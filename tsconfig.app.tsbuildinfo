@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/lib/api.ts","./src/lib/crypto.test.ts","./src/lib/crypto.ts","./src/lib/google.ts","./src/lib/room.test.ts","./src/lib/room.ts"],"version":"6.0.2"}

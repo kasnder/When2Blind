@@ -1,0 +1,1087 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
+import { createRoom, deleteRoom, exchangeSession, fetchRoom, saveSubmission } from './lib/api';
+import { decryptSubmission, encryptSubmission } from './lib/crypto';
+import { ensureGoogleIdentityLoaded, fetchPrimaryCalendarEvents } from './lib/google';
+import { aggregateRoom, availabilityFromGoogleEvents, buildEmptyAvailability, buildRoomSlots } from './lib/room';
+import type { DecryptedSubmission, Room } from './types';
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        oauth2: {
+          initTokenClient: (config: TokenClientConfig) => TokenClient;
+          revoke: (token: string, done?: () => void) => void;
+        };
+      };
+    };
+  }
+}
+
+type TokenResponse = {
+  access_token: string;
+  error?: string;
+  error_description?: string;
+};
+
+type TokenClientConfig = {
+  client_id: string;
+  scope: string;
+  callback: (response: TokenResponse) => void;
+  error_callback?: (error: { type: string }) => void;
+};
+
+type TokenClient = {
+  requestAccessToken: (options?: { prompt?: string }) => void;
+};
+
+type LocalOrganizerRoom = {
+  roomId: string;
+  title: string;
+  organizerLink: string;
+  participantLink: string;
+  expiresAt?: string;
+  savedAt: string;
+};
+
+type StoredSession = {
+  sessionToken: string;
+  expiresAt: string;
+};
+
+type CreatedRoomLinks = {
+  roomId: string;
+  organizerLink: string;
+  participantLink: string;
+  expiresAt: string;
+};
+
+const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<CreateRoomPage />} />
+      <Route path="/rooms/:roomId" element={<ParticipantRoomPage />} />
+      <Route path="/organize/:roomId" element={<OrganizerPage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
+
+function CreateRoomPage() {
+  const [title, setTitle] = useState('');
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [startDate, setStartDate] = useState(localDateString(new Date()));
+  const [endDate, setEndDate] = useState(daysFromNow(6));
+  const [startHour, setStartHour] = useState(9);
+  const [endHour, setEndHour] = useState(17);
+  const [saveOnDevice, setSaveOnDevice] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [links, setLinks] = useState<CreatedRoomLinks | null>(null);
+  const [savedRooms, setSavedRooms] = useState<LocalOrganizerRoom[]>([]);
+  const [retentionDays, setRetentionDays] = useState<number | null>(null);
+  const [copyState, setCopyState] = useState<'organizer' | 'participant' | null>(null);
+
+  useEffect(() => {
+    setSavedRooms(listLocalOrganizerRooms());
+  }, []);
+
+  async function handleCreateRoom(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (startHour >= endHour) {
+      setError('Daily end hour must be after the start hour.');
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const response = await createRoom({ title, timezone, startDate, endDate, startHour, endHour });
+      setRetentionDays(response.retentionDays);
+      setLinks({
+        roomId: response.room.id,
+        organizerLink: response.organizerLink,
+        participantLink: response.participantLink,
+        expiresAt: response.room.expiresAt,
+      });
+      setCopyState(null);
+
+      if (saveOnDevice) {
+        saveLocalOrganizerRoom(response.room.id, {
+          title: response.room.title,
+          organizerLink: response.organizerLink,
+          participantLink: response.participantLink,
+          expiresAt: response.room.expiresAt,
+        });
+      }
+
+      setSavedRooms(listLocalOrganizerRooms());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to create room.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleCopyLink(type: 'organizer' | 'participant') {
+    const value = type === 'organizer' ? links?.organizerLink : links?.participantLink;
+    if (!value || !navigator.clipboard) {
+      setError('Clipboard access is unavailable in this browser.');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyState(type);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to copy link.');
+    }
+  }
+
+  return (
+    <main className="page-shell">
+      <section className="panel hero">
+        <p className="eyebrow">When2Blind</p>
+        <h1>Schedule meetings without exposing your availability</h1>
+        <p className="lede">
+          Create a poll for possible meeting times, share one participant link, and let people mark when they are
+          free. Availability matching, decryption, and optional Google Calendar import all happen client-side in the browser.
+        </p>
+        <p className="muted">
+          Rooms auto-delete after {retentionDays ?? 30} days by default. Generated links are shown once here and
+          are not saved unless you explicitly store them in this browser, which is more convenient but less safe.
+        </p>
+
+        <div className="hero-facts">
+          <div className="hero-fact">
+            <p className="hero-fact-title">Private by default</p>
+            <p className="muted">Participant names and availability stay encrypted. The server stores ciphertext, not readable schedules.</p>
+          </div>
+          <div className="hero-fact">
+            <p className="hero-fact-title">Google import stays local</p>
+            <p className="muted">Google Calendar fetching happens in the browser. Tokens stay in memory only and are revoked immediately after import.</p>
+          </div>
+        </div>
+
+        <div className="instruction-strip">
+          <p><strong>1.</strong> Create the room and decide whether to keep local link copies in this browser.</p>
+          <p><strong>2.</strong> Send only the participant link. Keep the owner link private.</p>
+          <p><strong>3.</strong> Reopen the owner link to review overlap or delete the room before expiry.</p>
+        </div>
+
+        <form className="form-grid" onSubmit={handleCreateRoom}>
+          <label className="field-card field-span-2">
+            <span>Room title</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Board meeting, hiring interview, research sync"
+              required
+            />
+          </label>
+          <label className="field-card">
+            <span>Start date</span>
+            <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required />
+          </label>
+          <label className="field-card">
+            <span>End date</span>
+            <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} required />
+          </label>
+          <label className="field-card">
+            <span>Daily start hour</span>
+            <select value={startHour} onChange={(event) => setStartHour(Number(event.target.value))}>
+              {hourOptions.slice(0, 24).map((hour) => (
+                <option key={hour} value={hour}>
+                  {formatHour(hour)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-card">
+            <span>Daily end hour</span>
+            <select value={endHour} onChange={(event) => setEndHour(Number(event.target.value))}>
+              {hourOptions.slice(1).map((hour) => (
+                <option key={hour} value={hour}>
+                  {formatHour(hour)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="checkbox-card field-span-2">
+            <input type="checkbox" checked={saveOnDevice} onChange={(event) => setSaveOnDevice(event.target.checked)} />
+            <span>
+              Save organizer and participant links on this device
+              <small className="muted">Convenient, but less safe if other people can access this browser profile.</small>
+            </span>
+          </label>
+          <button className="primary submit-button" disabled={isSaving}>
+            {isSaving ? 'Creating room...' : 'Create room'}
+          </button>
+        </form>
+
+        {error ? <p className="error-banner">{error}</p> : null}
+        {links ? (
+          <div className="link-card">
+            <div className="link-card-header">
+              <div>
+                <p className="eyebrow">Room Created</p>
+                <h2>Store or send the links before you leave this page</h2>
+              </div>
+              <p className="muted">
+                Room `{links.roomId}` expires on {formatDateTime(links.expiresAt)} and is then deleted automatically.
+              </p>
+            </div>
+
+            <div className="link-grid">
+              <article className="generated-link-card">
+                <p className="generated-link-label">Owner link</p>
+                <p className="muted">
+                  Private admin link for reopening the room, viewing overlap, and deleting it.
+                </p>
+                <code>{links.organizerLink}</code>
+                <div className="action-row">
+                  <button type="button" onClick={() => handleCopyLink('organizer')}>
+                    {copyState === 'organizer' ? 'Copied owner link' : 'Copy owner link'}
+                  </button>
+                  <a className="button-link secondary-link" href={links.organizerLink}>
+                    Open owner link
+                  </a>
+                </div>
+              </article>
+
+              <article className="generated-link-card">
+                <p className="generated-link-label">Participant link</p>
+                <p className="muted">
+                  Send this link to participants so they can submit encrypted availability.
+                </p>
+                <code>{links.participantLink}</code>
+                <div className="action-row">
+                  <button type="button" onClick={() => handleCopyLink('participant')}>
+                    {copyState === 'participant' ? 'Copied participant link' : 'Copy participant link'}
+                  </button>
+                  <a className="button-link secondary-link" href={links.participantLink}>
+                    Open participant link
+                  </a>
+                </div>
+              </article>
+            </div>
+
+            <div className="link-notes">
+              <p className="muted">
+                If you did not enable local saving, these capability links are only shown in this browser session right now.
+              </p>
+              <p className="muted">
+                Saving them in the browser is optional and convenient, but anyone with access to this browser profile could reopen them.
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel my-rooms-panel">
+        <div className="section-header">
+          <div>
+            <p className="eyebrow">My Rooms</p>
+            <h2>Saved only when you opt in</h2>
+          </div>
+          <p className="muted">
+            This list is stored locally for convenience. Clearing browser storage removes it.
+          </p>
+        </div>
+
+        {savedRooms.length === 0 ? (
+          <p className="muted">No organizer rooms have been saved in this browser yet.</p>
+        ) : (
+          <div className="saved-room-list">
+            {savedRooms.map((savedRoom) => (
+              <article key={savedRoom.roomId} className="saved-room-card">
+                <div>
+                  <h3>{savedRoom.title}</h3>
+                  <p className="muted">Expires {formatDateTime(savedRoom.expiresAt ?? null)}</p>
+                  <p className="muted">Saved locally {formatDateTime(savedRoom.savedAt)}</p>
+                </div>
+                <div className="action-row">
+                  <a className="button-link primary-link" href={savedRoom.organizerLink}>
+                    Open owner link
+                  </a>
+                  <a className="button-link" href={savedRoom.participantLink}>
+                    Open participant link
+                  </a>
+                  <button type="button" className="danger" onClick={() => removeSavedRoom(savedRoom.roomId, setSavedRooms)}>
+                    Remove local copy
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function OrganizerPage() {
+  const params = useParams();
+  const [searchParams] = useSearchParams();
+  const roomId = params.roomId ?? '';
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [encryptionSecret, setEncryptionSecret] = useState<string | null>(null);
+  const [room, setRoom] = useState<Room | null>(null);
+  const [decryptedSubmissions, setDecryptedSubmissions] = useState<DecryptedSubmission[]>([]);
+  const [retentionDays, setRetentionDays] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const slots = useMemo(() => (room ? buildRoomSlots(room) : []), [room]);
+  const aggregate = useMemo(() => aggregateRoom(slots, decryptedSubmissions), [slots, decryptedSubmissions]);
+
+  useEffect(() => {
+    if (!roomId) {
+      setError('Missing room id.');
+      setIsLoading(false);
+      return;
+    }
+
+    const fragmentKey = new URLSearchParams(window.location.hash.slice(1)).get('key');
+    if (fragmentKey) {
+      setEncryptionSecret(fragmentKey);
+    }
+
+    void bootstrapSession({
+      roomId,
+      capabilityType: 'organizer',
+      capability: searchParams.get('cap') ?? searchParams.get('secret'),
+      scrubPath: `/organize/${roomId}`,
+      onSuccess: (value) => setSessionToken(value.sessionToken),
+      onError: setError,
+    });
+  }, [roomId, searchParams]);
+
+  useEffect(() => {
+    if (!roomId || !sessionToken || !encryptionSecret) {
+      if (sessionToken && !encryptionSecret) {
+        setIsLoading(false);
+        setError('Missing room decryption key. Re-open the original owner link for this room.');
+      }
+      return;
+    }
+
+    void loadRoom(roomId, sessionToken, encryptionSecret, {
+      setRoom,
+      setRetentionDays,
+      setDecryptedSubmissions,
+      setDisplayName: () => {},
+      setAvailability: () => {},
+      setError,
+      setIsLoading,
+      hydrateOwnSubmission: false,
+    });
+  }, [roomId, sessionToken, encryptionSecret]);
+
+  async function handleDelete() {
+    if (!roomId || !sessionToken) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await deleteRoom(roomId, sessionToken);
+      clearSession('organizer', roomId);
+      window.location.assign('/');
+    } catch (caught) {
+      clearSession('organizer', roomId);
+      setError(caught instanceof Error ? caught.message : 'Failed to delete room.');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <main className="page-shell">
+      <section className="panel">
+        <PageActions />
+        <p className="eyebrow">Organizer controls</p>
+        <h1>Room administration</h1>
+        <p className="lede">
+          This owner page uses a short-lived organizer session after the capability link is exchanged and scrubbed.
+        </p>
+        <p className="muted">
+          Re-open the original owner link if this session expires or you clear this browser session.
+        </p>
+        {room ? (
+          <p className="muted">
+            This room expires on {formatDateTime(room.expiresAt)}. Current retention is {retentionDays ?? 30} days.
+          </p>
+        ) : null}
+        {error ? <p className="error-banner">{error}</p> : null}
+        {room ? (
+          <>
+            <div className="status-grid">
+              <div>
+                <dt>Timezone</dt>
+                <dd>{room.timezone}</dd>
+              </div>
+              <div>
+                <dt>Date range</dt>
+                <dd>{room.startDate} to {room.endDate}</dd>
+              </div>
+              <div>
+                <dt>Participants</dt>
+                <dd>{aggregate.participantCount}</dd>
+              </div>
+              <div>
+                <dt>Exact matches</dt>
+                <dd>{aggregate.exactMatches.length}</dd>
+              </div>
+            </div>
+
+            <AvailabilityGrid room={room} slots={slots} aggregate={aggregate} />
+          </>
+        ) : null}
+        {isLoading ? <p className="muted">Loading encrypted room data...</p> : null}
+        <button className="danger" disabled={deleting || !sessionToken} onClick={handleDelete}>
+          {deleting ? 'Deleting room...' : 'Delete room'}
+        </button>
+        <MissingKeyHelp capabilityType="organizer" roomId={roomId} />
+      </section>
+    </main>
+  );
+}
+
+function ParticipantRoomPage() {
+  const params = useParams();
+  const [searchParams] = useSearchParams();
+  const roomId = params.roomId ?? '';
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [encryptionSecret, setEncryptionSecret] = useState<string | null>(null);
+  const [room, setRoom] = useState<Room | null>(null);
+  const [decryptedSubmissions, setDecryptedSubmissions] = useState<DecryptedSubmission[]>([]);
+  const [displayName, setDisplayName] = useState('');
+  const [availability, setAvailability] = useState<Record<string, boolean>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isImportingGoogle, setIsImportingGoogle] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retentionDays, setRetentionDays] = useState<number | null>(null);
+  const [googleState, setGoogleState] = useState<{ ready: boolean; tokenClient: TokenClient | null; accessToken: string | null }>({
+    ready: false,
+    tokenClient: null,
+    accessToken: null,
+  });
+  const dragState = useRef<{ active: boolean; value: boolean | null }>({ active: false, value: null });
+
+  const slots = useMemo(() => (room ? buildRoomSlots(room) : []), [room]);
+  const aggregate = useMemo(() => aggregateRoom(slots, decryptedSubmissions), [slots, decryptedSubmissions]);
+
+  useEffect(() => {
+    if (!roomId) {
+      setError('Missing room id.');
+      setIsLoading(false);
+      return;
+    }
+
+    const fragmentKey = new URLSearchParams(window.location.hash.slice(1)).get('key');
+    if (fragmentKey) {
+      setEncryptionSecret(fragmentKey);
+    }
+
+    void bootstrapSession({
+      roomId,
+      capabilityType: 'participant',
+      capability: searchParams.get('cap') ?? searchParams.get('access'),
+      scrubPath: `/rooms/${roomId}`,
+      onSuccess: (value) => setSessionToken(value.sessionToken),
+      onError: setError,
+    });
+  }, [roomId, searchParams]);
+
+  useEffect(() => {
+    if (!clientId) {
+      return;
+    }
+
+    void ensureGoogleIdentityLoaded()
+      .then(() => {
+        if (!window.google?.accounts.oauth2) {
+          return;
+        }
+
+        const tokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: CALENDAR_SCOPE,
+          callback: (response) => {
+            if (response.error) {
+              setError(response.error_description ?? response.error);
+              return;
+            }
+
+            setGoogleState((current) => ({ ...current, accessToken: response.access_token }));
+          },
+          error_callback: (oauthError) => setError(`Google OAuth error: ${oauthError.type}`),
+        });
+
+        setGoogleState((current) => ({ ...current, ready: true, tokenClient }));
+      })
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : 'Failed to load Google sign-in.');
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!roomId || !sessionToken || !encryptionSecret) {
+      if (sessionToken && !encryptionSecret) {
+        setIsLoading(false);
+        setError('Missing room decryption key. Re-open the original participant link for this room.');
+      }
+      return;
+    }
+
+    void loadRoom(roomId, sessionToken, encryptionSecret, {
+      setRoom,
+      setRetentionDays,
+      setDecryptedSubmissions,
+      setDisplayName,
+      setAvailability,
+      setError,
+      setIsLoading,
+    });
+  }, [roomId, sessionToken, encryptionSecret]);
+
+  useEffect(() => {
+    if (!room || !googleState.accessToken || isImportingGoogle) {
+      return;
+    }
+
+    let cancelled = false;
+    const accessToken = googleState.accessToken;
+    const currentRoom = room;
+
+    async function importGoogleAvailability() {
+      setIsImportingGoogle(true);
+      try {
+        const slotList = buildRoomSlots(currentRoom);
+        const timeMin = new Date(`${currentRoom.startDate}T00:00:00`).toISOString();
+        const timeMax = new Date(`${currentRoom.endDate}T23:59:59`).toISOString();
+        const { events } = await fetchPrimaryCalendarEvents(accessToken, timeMin, timeMax);
+        if (!cancelled) {
+          setAvailability(availabilityFromGoogleEvents(slotList, events, currentRoom.timezone));
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : 'Failed to import Google availability.');
+        }
+      } finally {
+        window.google?.accounts.oauth2.revoke(accessToken);
+        setGoogleState((current) => ({ ...current, accessToken: null }));
+        setIsImportingGoogle(false);
+      }
+    }
+
+    void importGoogleAvailability();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [room, googleState.accessToken, isImportingGoogle]);
+
+  function updateSlot(slotKey: string, nextValue: boolean) {
+    setAvailability((current) => ({
+      ...current,
+      [slotKey]: nextValue,
+    }));
+  }
+
+  async function handleGoogleAutofill() {
+    if (isImportingGoogle) {
+      return;
+    }
+
+    googleState.tokenClient?.requestAccessToken({ prompt: googleState.accessToken ? '' : 'consent' });
+  }
+
+  async function handleSave() {
+    if (!room || !sessionToken || !encryptionSecret) {
+      return;
+    }
+
+    if (!displayName.trim()) {
+      setError('Choose a display name before saving your availability.');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setError(null);
+      const payload: DecryptedSubmission = {
+        displayName: displayName.trim(),
+        availabilityBySlot: availability,
+      };
+      const envelope = await encryptSubmission(room.id, encryptionSecret, payload);
+      const existing = getSubmissionMetadata(room.id);
+      const saved = await saveSubmission({
+        roomId: room.id,
+        sessionToken,
+        submissionId: existing?.submissionId,
+        editToken: existing?.editToken,
+        envelope,
+      });
+
+      saveSubmissionMetadata(room.id, saved);
+      void loadRoom(room.id, sessionToken, encryptionSecret, {
+        setRoom,
+        setRetentionDays,
+        setDecryptedSubmissions,
+        setDisplayName,
+        setAvailability,
+        setError: (value) => {
+          if (value) {
+            console.error('Background room refresh failed after save:', value);
+          }
+        },
+        setIsLoading: () => {},
+      });
+    } catch (caught) {
+      if (caught instanceof Error && caught.message.includes('401')) {
+        clearSession('participant', room.id);
+      }
+      setError(caught instanceof Error ? caught.message : 'Failed to save encrypted submission.');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <main className="page-shell">
+      <section className="panel">
+        <PageActions />
+        <p className="eyebrow">Participant room</p>
+        <h1>{room?.title ?? 'Loading room...'}</h1>
+        <p className="lede">
+          The participant capability is exchanged once for a short-lived session, then all submissions are
+          decrypted locally in your browser.
+        </p>
+        <p className="muted">
+          If you connect Google Calendar, the access token stays in memory only, is not stored by this app, and is
+          revoked immediately after the busy slots are imported.
+        </p>
+        {room ? (
+          <p className="muted">
+            This room expires on {formatDateTime(room.expiresAt)}. Current retention is {retentionDays ?? 30} days.
+          </p>
+        ) : null}
+        {error ? <p className="error-banner">{error}</p> : null}
+
+        {room ? (
+          <>
+            <div className="status-grid">
+              <div>
+                <dt>Timezone</dt>
+                <dd>{room.timezone}</dd>
+              </div>
+              <div>
+                <dt>Date range</dt>
+                <dd>{room.startDate} to {room.endDate}</dd>
+              </div>
+              <div>
+                <dt>Participants</dt>
+                <dd>{aggregate.participantCount}</dd>
+              </div>
+              <div>
+                <dt>Exact matches</dt>
+                <dd>{aggregate.exactMatches.length}</dd>
+              </div>
+            </div>
+
+            <div className="controls">
+              <label>
+                <span>Your display name</span>
+                <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Konrad" />
+              </label>
+              <div className="action-row">
+                <button className="primary" onClick={handleSave} disabled={isSaving || isLoading}>
+                  {isSaving ? 'Saving encrypted submission...' : 'Save availability'}
+                </button>
+                <button onClick={handleGoogleAutofill} disabled={isLoading || !googleState.ready || isImportingGoogle}>
+                  {isImportingGoogle ? 'Importing from Google...' : 'Connect Google and import'}
+                </button>
+                <button onClick={() => setAvailability(buildEmptyAvailability(slots))} disabled={isLoading}>
+                  Clear grid
+                </button>
+              </div>
+            </div>
+
+            <AvailabilityGrid
+              room={room}
+              slots={slots}
+              aggregate={aggregate}
+              selectedAvailability={availability}
+              onToggleSlot={(slotKey, nextValue) => {
+                dragState.current = { active: true, value: nextValue };
+                updateSlot(slotKey, nextValue);
+              }}
+              onDragEnter={(slotKey) => {
+                if (dragState.current.active && dragState.current.value !== null) {
+                  updateSlot(slotKey, dragState.current.value);
+                }
+              }}
+              onDragEnd={() => {
+                dragState.current = { active: false, value: null };
+              }}
+            />
+          </>
+        ) : null}
+
+        {isLoading ? <p className="muted">Loading encrypted room data...</p> : null}
+        <MissingKeyHelp capabilityType="participant" roomId={roomId} />
+      </section>
+    </main>
+  );
+}
+
+function PageActions() {
+  return (
+    <div className="page-actions">
+      <Link className="button-link secondary-link" to="/">
+        Back to start page
+      </Link>
+    </div>
+  );
+}
+
+function MissingKeyHelp(input: {
+  capabilityType: 'organizer' | 'participant';
+  roomId: string;
+}) {
+  const label = input.capabilityType === 'organizer' ? 'owner' : 'participant';
+  const currentPath = input.capabilityType === 'organizer' ? `/organize/${input.roomId}` : `/rooms/${input.roomId}`;
+  const hasStoredSession = Boolean(input.roomId) && Boolean(loadSession(input.capabilityType, input.roomId));
+  const hasFragmentKey = Boolean(new URLSearchParams(window.location.hash.slice(1)).get('key'));
+
+  if (!hasStoredSession || hasFragmentKey) {
+    return null;
+  }
+
+  return (
+    <div className="info-card">
+      <p className="info-title">Why this happens after F5</p>
+      <p className="muted">
+        Reloading <code>{currentPath}</code> keeps your short-lived session in this browser, but the decryption key
+        lives only in the original link fragment and is not resent after refresh.
+      </p>
+      <p className="muted">
+        To continue, reopen the original {label} link that included <code>#key=...</code>. The server cannot restore
+        that key for you.
+      </p>
+    </div>
+  );
+}
+
+async function bootstrapSession(input: {
+  roomId: string;
+  capabilityType: 'organizer' | 'participant';
+  capability: string | null;
+  scrubPath: string;
+  onSuccess: (value: StoredSession) => void;
+  onError: (value: string) => void;
+}) {
+  const stored = loadSession(input.capabilityType, input.roomId);
+  const capability = input.capability?.trim();
+
+  if (capability) {
+    window.history.replaceState({}, document.title, input.scrubPath);
+    try {
+      const session = await exchangeSession({
+        roomId: input.roomId,
+        capabilityType: input.capabilityType,
+        capability,
+      });
+      const storedSession = {
+        sessionToken: session.sessionToken,
+        expiresAt: session.expiresAt,
+      };
+      saveSession(input.capabilityType, input.roomId, storedSession);
+      input.onSuccess(storedSession);
+      return;
+    } catch (caught) {
+      clearSession(input.capabilityType, input.roomId);
+      input.onError(caught instanceof Error ? caught.message : 'Failed to exchange capability for a session.');
+      return;
+    }
+  }
+
+  if (stored) {
+    input.onSuccess(stored);
+    return;
+  }
+
+  input.onError(`Missing ${input.capabilityType} capability. Re-open the original link for this room.`);
+}
+
+async function loadRoom(
+  roomId: string,
+  sessionToken: string,
+  encryptionSecret: string,
+  handlers: {
+    setRoom: (room: Room) => void;
+    setRetentionDays: (value: number) => void;
+    setDecryptedSubmissions: (value: DecryptedSubmission[]) => void;
+    setDisplayName: (value: string) => void;
+    setAvailability: (value: Record<string, boolean>) => void;
+    setError: (value: string | null) => void;
+    setIsLoading: (value: boolean) => void;
+    hydrateOwnSubmission?: boolean;
+  },
+) {
+  try {
+    handlers.setIsLoading(true);
+    handlers.setError(null);
+    const response = await fetchRoom(roomId, sessionToken);
+    handlers.setRetentionDays(response.retentionDays);
+    const decrypted = await Promise.all(
+      response.submissions.map((submission) => decryptSubmission(roomId, encryptionSecret, submission.envelope)),
+    );
+
+    handlers.setRoom(response.room);
+    handlers.setDecryptedSubmissions(decrypted);
+    const nextSlots = buildRoomSlots(response.room);
+    const defaultAvailability = buildEmptyAvailability(nextSlots);
+    if (handlers.hydrateOwnSubmission === false) {
+      return;
+    }
+
+    const existingData = getSubmissionMetadata(response.room.id);
+    const existingSubmission = existingData
+      ? response.submissions.find((submission) => submission.id === existingData.submissionId)
+      : null;
+
+    if (existingSubmission) {
+      const decryptedOwnSubmission = await decryptSubmission(roomId, encryptionSecret, existingSubmission.envelope);
+      handlers.setDisplayName(decryptedOwnSubmission.displayName);
+      handlers.setAvailability({
+        ...defaultAvailability,
+        ...decryptedOwnSubmission.availabilityBySlot,
+      });
+    } else {
+      handlers.setAvailability(defaultAvailability);
+    }
+  } catch (caught) {
+    handlers.setError(caught instanceof Error ? caught.message : 'Failed to load room.');
+  } finally {
+    handlers.setIsLoading(false);
+  }
+}
+
+function daysFromNow(days: number) {
+  const value = new Date();
+  value.setDate(value.getDate() + days);
+  return localDateString(value);
+}
+
+const hourOptions = Array.from({ length: 25 }, (_, hour) => hour);
+
+function formatHour(hour: number) {
+  if (hour === 24) {
+    return '24:00';
+  }
+
+  return `${String(hour).padStart(2, '0')}:00`;
+}
+
+function localDateString(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return 'the configured retention deadline';
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(parsed);
+}
+
+function sessionStorageKey(capabilityType: 'organizer' | 'participant', roomId: string) {
+  return `session:${capabilityType}:${roomId}`;
+}
+
+function loadSession(capabilityType: 'organizer' | 'participant', roomId: string) {
+  const raw = sessionStorage.getItem(sessionStorageKey(capabilityType, roomId));
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as StoredSession;
+    if (new Date(parsed.expiresAt).getTime() < Date.now()) {
+      sessionStorage.removeItem(sessionStorageKey(capabilityType, roomId));
+      return null;
+    }
+    return parsed;
+  } catch {
+    sessionStorage.removeItem(sessionStorageKey(capabilityType, roomId));
+    return null;
+  }
+}
+
+function saveSession(capabilityType: 'organizer' | 'participant', roomId: string, value: StoredSession) {
+  sessionStorage.setItem(sessionStorageKey(capabilityType, roomId), JSON.stringify(value));
+}
+
+function clearSession(capabilityType: 'organizer' | 'participant', roomId: string) {
+  sessionStorage.removeItem(sessionStorageKey(capabilityType, roomId));
+}
+
+function getSubmissionMetadata(roomId: string) {
+  const raw = sessionStorage.getItem(`submission:${roomId}`);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as { submissionId: string; editToken: string };
+  } catch {
+    sessionStorage.removeItem(`submission:${roomId}`);
+    return null;
+  }
+}
+
+function saveSubmissionMetadata(roomId: string, value: { submissionId: string; editToken: string }) {
+  sessionStorage.setItem(`submission:${roomId}`, JSON.stringify(value));
+}
+
+function listLocalOrganizerRooms(): LocalOrganizerRoom[] {
+  return Object.keys(localStorage)
+    .filter((key) => key.startsWith('organizer-room:'))
+    .map<LocalOrganizerRoom | null>((key) => {
+      const roomId = key.replace('organizer-room:', '');
+      const raw = localStorage.getItem(key);
+      if (!raw) {
+        return null;
+      }
+
+      try {
+        const parsed = JSON.parse(raw) as Omit<LocalOrganizerRoom, 'roomId' | 'savedAt'> & { savedAt?: string };
+        return {
+          roomId,
+          title: parsed.title,
+          organizerLink: parsed.organizerLink,
+          participantLink: parsed.participantLink,
+          expiresAt: parsed.expiresAt,
+          savedAt: parsed.savedAt ?? new Date().toISOString(),
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((value): value is LocalOrganizerRoom => value !== null)
+    .sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+}
+
+function saveLocalOrganizerRoom(
+  roomId: string,
+  value: Omit<LocalOrganizerRoom, 'roomId' | 'savedAt'>,
+) {
+  localStorage.setItem(
+    `organizer-room:${roomId}`,
+    JSON.stringify({
+      ...value,
+      savedAt: new Date().toISOString(),
+    }),
+  );
+}
+
+function removeSavedRoom(roomId: string, setSavedRooms: (rooms: LocalOrganizerRoom[]) => void) {
+  localStorage.removeItem(`organizer-room:${roomId}`);
+  setSavedRooms(listLocalOrganizerRooms());
+}
+
+function AvailabilityGrid(input: {
+  room: Room;
+  slots: ReturnType<typeof buildRoomSlots>;
+  aggregate: ReturnType<typeof aggregateRoom>;
+  selectedAvailability?: Record<string, boolean>;
+  onToggleSlot?: (slotKey: string, nextValue: boolean) => void;
+  onDragEnter?: (slotKey: string) => void;
+  onDragEnd?: () => void;
+}) {
+  const exactSet = new Set(input.aggregate.exactMatches);
+  const nearCountBySlot = new Map(input.aggregate.nearMatches.map((entry) => [entry.slotKey, entry.freeCount]));
+
+  return (
+    <div className="grid-wrap">
+      <div className="time-column">
+        <div className="corner-cell" />
+        {Array.from({ length: input.room.endHour - input.room.startHour }, (_, offset) => {
+          const hour = input.room.startHour + offset;
+          return <div key={hour} className="time-label">{`${String(hour).padStart(2, '0')}:00`}</div>;
+        })}
+      </div>
+      <div className="matrix">
+        {Array.from(new Set(input.slots.map((slot) => `${slot.dayIndex}:${slot.dateLabel}`))).map((entry) => {
+          const [dayIndexString, dateLabel] = entry.split(':');
+          const dayIndex = Number(dayIndexString);
+          const daySlots = input.slots.filter((slot) => slot.dayIndex === dayIndex);
+
+          return (
+            <div key={entry} className="day-strip">
+              <div className="day-header">{dateLabel}</div>
+              {daySlots.map((slot) => {
+                const freeCount = nearCountBySlot.get(slot.key) ?? 0;
+                const isInteractive = Boolean(input.onToggleSlot);
+                const isSelected = input.selectedAvailability?.[slot.key] ?? false;
+                const className = [
+                  'slot-cell',
+                  isSelected ? 'selected' : '',
+                  exactSet.has(slot.key) ? 'exact' : '',
+                  freeCount > 0 ? `heat-${Math.min(freeCount, 4)}` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ');
+
+                return (
+                  <button
+                    key={slot.key}
+                    type="button"
+                    className={className}
+                    disabled={!isInteractive}
+                    onMouseDown={() => {
+                      if (!input.onToggleSlot) {
+                        return;
+                      }
+                      input.onToggleSlot(slot.key, !isSelected);
+                    }}
+                    onMouseEnter={() => input.onDragEnter?.(slot.key)}
+                    onMouseUp={() => input.onDragEnd?.()}
+                    onBlur={() => input.onDragEnd?.()}
+                    title={`${slot.dateLabel} ${slot.timeLabel} | selected=${isSelected} | freeCount=${freeCount}`}
+                  >
+                    <span>{slot.timeLabel}</span>
+                    <small>{exactSet.has(slot.key) ? 'All free' : freeCount > 0 ? `${freeCount} free` : 'No match'}</small>
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default App;
