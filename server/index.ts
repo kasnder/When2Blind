@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import helmet from 'helmet';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ZodError } from 'zod';
 import {
   createAuthSession,
@@ -37,6 +39,9 @@ const parsedRoomTtlDays = Number(process.env.ROOM_TTL_DAYS ?? 30);
 const roomTtlDays = Number.isFinite(parsedRoomTtlDays) && parsedRoomTtlDays > 0 ? parsedRoomTtlDays : 30;
 const parsedSessionTtlHours = Number(process.env.SESSION_TTL_HOURS ?? 12);
 const sessionTtlHours = Number.isFinite(parsedSessionTtlHours) && parsedSessionTtlHours > 0 ? parsedSessionTtlHours : 12;
+const currentDir = fileURLToPath(new URL('.', import.meta.url));
+const distDir = resolve(currentDir, '..', '..', 'dist');
+const distIndexPath = resolve(distDir, 'index.html');
 const allowedOrigins = new Set(
   (process.env.ALLOWED_ORIGINS ?? appOrigin)
     .split(',')
@@ -363,6 +368,13 @@ export function createApp() {
       });
     }
   });
+
+  if (process.env.NODE_ENV === 'production' && existsSync(distIndexPath)) {
+    app.use(express.static(distDir));
+    app.get(/^\/(?!api(?:\/|$)).*/, (_, response) => {
+      response.sendFile(distIndexPath);
+    });
+  }
 
   return app;
 }

@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.server.json && tsc -b && vite build",
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "start": "node server-dist/server/index.js",
     "start:server": "node server-dist/server/index.js"
   },
   "dependencies": {

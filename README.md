@@ -295,6 +295,12 @@ Build production assets:
 npm run build
 ```
 
+Run the production server:
+
+```bash
+npm start
+```
+
 Run tests:
 
 ```bash
@@ -305,6 +311,17 @@ Default local addresses:
 
 - frontend: `http://127.0.0.1:5173`
 - API: `http://127.0.0.1:8787`
+
+## Railway
+
+For a single Railway service, deploy the built React app and API together:
+
+- build command: `npm run build`
+- start command: `npm start`
+- set `APP_ORIGIN` to your public Railway HTTPS URL
+- set `ALLOWED_ORIGINS` to the same public Railway HTTPS URL
+
+With that setup, Express serves the built `dist` frontend and handles `/api/*` on the same origin, which avoids `405 Method Not Allowed` responses from a static host handling `POST /api/...`.
 
 ## Files To Know
 
