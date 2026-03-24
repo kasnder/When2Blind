@@ -4,6 +4,7 @@ import { createRoom, deleteRoom, exchangeSession, fetchRoom, saveSubmission } fr
 import { decryptSubmission, encryptSubmission } from './lib/crypto';
 import { ensureGoogleIdentityLoaded, fetchPrimaryCalendarEvents } from './lib/google';
 import { aggregateRoom, availabilityFromGoogleEvents, buildEmptyAvailability, buildRoomSlots } from './lib/room';
+import logoUrl from './assets/logo-120.png';
 import type { DecryptedSubmission, Room } from './types';
 
 declare global {
@@ -146,7 +147,7 @@ function CreateRoomPage() {
   return (
     <main className="page-shell">
       <section className="panel hero">
-        <p className="eyebrow">When2Blind</p>
+        <BrandLockup />
         <h1>Schedule meetings without exposing your availability</h1>
         <p className="lede">
           Create a poll for possible meeting times, share one participant link, and let people mark when they are
@@ -747,9 +748,25 @@ function ParticipantRoomPage() {
 function PageActions() {
   return (
     <div className="page-actions">
+      <Link className="brand-link" to="/">
+        <img className="brand-logo brand-logo-small" src={logoUrl} alt="When2Blind logo" />
+        <span className="eyebrow">When2Blind</span>
+      </Link>
       <Link className="button-link secondary-link" to="/">
         Back to start page
       </Link>
+    </div>
+  );
+}
+
+function BrandLockup() {
+  return (
+    <div className="brand-lockup">
+      <img className="brand-logo" src={logoUrl} alt="When2Blind logo" />
+      <div>
+        <p className="eyebrow">When2Blind</p>
+        <p className="brand-tagline">Private meeting scheduling</p>
+      </div>
     </div>
   );
 }

@@ -50,8 +50,43 @@ button {
 
 .page-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   margin-bottom: 1rem;
+}
+
+.brand-lockup,
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.brand-link {
+  text-decoration: none;
+}
+
+.brand-logo {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  flex: 0 0 auto;
+  box-shadow: 0 12px 24px rgba(24, 37, 58, 0.08);
+}
+
+.brand-logo-small {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.brand-tagline {
+  margin: 0;
+  color: #4b5d73;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .my-rooms-panel {
