@@ -149,6 +149,15 @@ h2 {
   color: #6f430a;
 }
 
+.site-footer {
+  margin-top: 1.25rem;
+  padding: 1.25rem 0 0.5rem;
+  display: flex;
+  justify-content: center;
+  border-top: 1px solid rgba(24, 37, 58, 0.08);
+  font-size: 0.95rem;
+}
+
 .controls {
   display: grid;
   gap: 1rem;

@@ -40,7 +40,6 @@ type TokenClient = {
 type LocalOrganizerRoom = {
   roomId: string;
   title: string;
-  organizerLink: string;
   participantLink: string;
   expiresAt?: string;
   savedAt: string;
@@ -53,7 +52,6 @@ type StoredSession = {
 
 type CreatedRoomLinks = {
   roomId: string;
-  organizerLink: string;
   participantLink: string;
   expiresAt: string;
 };
@@ -89,7 +87,7 @@ function CreateRoomPage() {
   const [links, setLinks] = useState<CreatedRoomLinks | null>(null);
   const [savedRooms, setSavedRooms] = useState<LocalOrganizerRoom[]>([]);
   const [retentionDays, setRetentionDays] = useState<number | null>(null);
-  const [copyState, setCopyState] = useState<'organizer' | 'participant' | null>(null);
+  const [copyState, setCopyState] = useState<'participant' | null>(null);
   const dateDragState = useRef<{ active: boolean; value: boolean | null; anchorDateKey: string | null }>({
     active: false,
     value: null,
@@ -130,7 +128,6 @@ function CreateRoomPage() {
       setRetentionDays(response.retentionDays);
       setLinks({
         roomId: response.room.id,
-        organizerLink: response.organizerLink,
         participantLink: response.participantLink,
         expiresAt: response.room.expiresAt,
       });
@@ -139,7 +136,6 @@ function CreateRoomPage() {
       if (saveOnDevice) {
         saveLocalOrganizerRoom(response.room.id, {
           title: response.room.title,
-          organizerLink: response.organizerLink,
           participantLink: response.participantLink,
           expiresAt: response.room.expiresAt,
         });
@@ -153,8 +149,8 @@ function CreateRoomPage() {
     }
   }
 
-  async function handleCopyLink(type: 'organizer' | 'participant') {
-    const value = type === 'organizer' ? links?.organizerLink : links?.participantLink;
+  async function handleCopyLink() {
+    const value = links?.participantLink;
     if (!value || !navigator.clipboard) {
       setError('Clipboard access is unavailable in this browser.');
       return;
@@ -162,14 +158,14 @@ function CreateRoomPage() {
 
     try {
       await navigator.clipboard.writeText(value);
-      setCopyState(type);
+      setCopyState('participant');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Failed to copy link.');
     }
   }
 
   return (
-        <main className="page-shell">
+    <main className="page-shell">
       <section className="panel hero">
         <BrandLockup />
         <h1>Privacy-preserving meeting scheduling</h1>
@@ -178,14 +174,8 @@ function CreateRoomPage() {
           Google Calendar import all happen in each participant&apos;s browser, not on the server.
         </p>
         <p className="muted">
-          Rooms auto-delete after {retentionDays ?? 30} days. Share the participant link, keep the owner link
-          private, and only save links in this browser if you accept that risk.
-        </p>
-        <p className="muted">
-          Privacy policy:{' '}
-          <a className="inline-link" href="https://kollnig.net/privacy/" target="_blank" rel="noreferrer">
-            kollnig.net/privacy/
-          </a>
+          Rooms auto-delete after {retentionDays ?? 30} days. Share the participant link, and only save it in this
+          browser if you accept that risk.
         </p>
 
         <form className="create-room-layout" onSubmit={handleCreateRoom}>
@@ -226,7 +216,7 @@ function CreateRoomPage() {
             <label className="checkbox-card">
               <input type="checkbox" checked={saveOnDevice} onChange={(event) => setSaveOnDevice(event.target.checked)} />
               <span>
-                Save organizer and participant links on this device
+                Save the participant link on this device
                 <small className="muted">Convenient, but less safe if other people can access this browser profile.</small>
               </span>
             </label>
@@ -312,29 +302,13 @@ function CreateRoomPage() {
 
             <div className="link-grid">
               <article className="generated-link-card">
-                <p className="generated-link-label">Owner link</p>
-                <p className="muted">
-                  Private admin link for reopening the room, viewing overlap, and deleting it.
-                </p>
-                <code>{links.organizerLink}</code>
-                <div className="action-row">
-                  <button type="button" onClick={() => handleCopyLink('organizer')}>
-                    {copyState === 'organizer' ? 'Copied owner link' : 'Copy owner link'}
-                  </button>
-                  <a className="button-link secondary-link" href={links.organizerLink}>
-                    Open owner link
-                  </a>
-                </div>
-              </article>
-
-              <article className="generated-link-card">
                 <p className="generated-link-label">Participant link</p>
                 <p className="muted">
                   Send this link to participants so they can submit encrypted availability.
                 </p>
                 <code>{links.participantLink}</code>
                 <div className="action-row">
-                  <button type="button" onClick={() => handleCopyLink('participant')}>
+                  <button type="button" onClick={() => handleCopyLink()}>
                     {copyState === 'participant' ? 'Copied participant link' : 'Copy participant link'}
                   </button>
                   <a className="button-link secondary-link" href={links.participantLink}>
@@ -359,7 +333,7 @@ function CreateRoomPage() {
       <section className="panel my-rooms-panel">
         <div className="section-header">
           <div>
-            <p className="eyebrow">My Rooms</p>
+            <p className="eyebrow">Saved Links</p>
             <h2>Saved only when you opt in</h2>
           </div>
           <p className="muted">
@@ -368,7 +342,7 @@ function CreateRoomPage() {
         </div>
 
         {savedRooms.length === 0 ? (
-          <p className="muted">No organizer rooms have been saved in this browser yet.</p>
+          <p className="muted">No participant links have been saved in this browser yet.</p>
         ) : (
           <div className="saved-room-list">
             {savedRooms.map((savedRoom) => (
@@ -379,10 +353,7 @@ function CreateRoomPage() {
                   <p className="muted">Saved locally {formatDateTime(savedRoom.savedAt)}</p>
                 </div>
                 <div className="action-row">
-                  <a className="button-link primary-link" href={savedRoom.organizerLink}>
-                    Open owner link
-                  </a>
-                  <a className="button-link" href={savedRoom.participantLink}>
+                  <a className="button-link primary-link" href={savedRoom.participantLink}>
                     Open participant link
                   </a>
                   <button type="button" className="danger" onClick={() => removeSavedRoom(savedRoom.roomId, setSavedRooms)}>
@@ -394,6 +365,12 @@ function CreateRoomPage() {
           </div>
         )}
       </section>
+
+      <footer className="site-footer">
+        <a className="inline-link" href="https://kollnig.net/privacy/" target="_blank" rel="noreferrer">
+          Privacy policy
+        </a>
+      </footer>
     </main>
   );
 }
@@ -440,7 +417,7 @@ function OrganizerPage() {
     if (!roomId || !sessionToken || !encryptionSecret) {
       if (sessionToken && !encryptionSecret) {
         setIsLoading(false);
-        setError('Missing room decryption key. Re-open the original owner link for this room.');
+        setError('Missing room decryption key. Re-open the original organizer access link for this room.');
       }
       return;
     }
@@ -485,7 +462,7 @@ function OrganizerPage() {
           This owner page uses a short-lived organizer session after the capability link is exchanged and scrubbed.
         </p>
         <p className="muted">
-          Re-open the original owner link if this session expires or you clear this browser session.
+          Re-open the original organizer access link if this session expires or you clear this browser session.
         </p>
         {room ? (
           <p className="muted">
@@ -1276,11 +1253,24 @@ function listLocalOrganizerRooms(): LocalOrganizerRoom[] {
       }
 
       try {
-        const parsed = JSON.parse(raw) as Omit<LocalOrganizerRoom, 'roomId' | 'savedAt'> & { savedAt?: string };
+        const parsed = JSON.parse(raw) as Partial<LocalOrganizerRoom> & { savedAt?: string };
+        if (typeof parsed.title !== 'string' || typeof parsed.participantLink !== 'string') {
+          return null;
+        }
+        if ('organizerLink' in parsed) {
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              title: parsed.title,
+              participantLink: parsed.participantLink,
+              expiresAt: parsed.expiresAt,
+              savedAt: parsed.savedAt ?? new Date().toISOString(),
+            }),
+          );
+        }
         return {
           roomId,
           title: parsed.title,
-          organizerLink: parsed.organizerLink,
           participantLink: parsed.participantLink,
           expiresAt: parsed.expiresAt,
           savedAt: parsed.savedAt ?? new Date().toISOString(),

@@ -79,6 +79,14 @@ describe('When2Blind API', () => {
     expect(response.body.participantLink).toContain('#key=');
   });
 
+  it('keeps popup-based OAuth compatible security headers', async () => {
+    const response = await request(createApp()).get('/api/health');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['cross-origin-opener-policy']).toBe('same-origin-allow-popups');
+    expect(response.headers['referrer-policy']).toBe('no-referrer');
+  });
+
   it('rejects invalid room hour windows', async () => {
     const response = await request(createApp())
       .post('/api/rooms')
