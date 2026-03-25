@@ -70,10 +70,18 @@ export function availabilityFromGoogleEvents(slots: RoomSlot[], events: EventIte
 
 export function aggregateRoom(slots: RoomSlot[], submissions: DecryptedSubmission[]): RoomAggregate {
   const participantCount = submissions.length;
-  const freeCounts = slots.map((slot) => ({
-    slotKey: slot.key,
-    freeCount: submissions.reduce((count, submission) => count + (submission.availabilityBySlot[slot.key] ? 1 : 0), 0),
-  }));
+  const freeCounts = slots.map((slot) => {
+    const displayNames = submissions
+      .filter((submission) => submission.availabilityBySlot[slot.key])
+      .map((submission) => submission.displayName.trim())
+      .filter(Boolean);
+
+    return {
+      slotKey: slot.key,
+      freeCount: displayNames.length,
+      displayNames,
+    };
+  });
 
   return {
     participantCount,

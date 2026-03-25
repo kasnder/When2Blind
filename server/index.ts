@@ -45,7 +45,7 @@ const distIndexPath = resolve(distDir, 'index.html');
 const allowedOrigins = new Set(
   (process.env.ALLOWED_ORIGINS ?? appOrigin)
     .split(',')
-    .map((value) => value.trim())
+    .map((value) => normalizeOrigin(value))
     .filter(Boolean),
 );
 
@@ -466,18 +466,19 @@ function authRateLimit(scope: string, windowMs: number, max: number) {
 
 function corsMiddleware(request: Request, response: Response, next: NextFunction) {
   const origin = request.header('origin');
+  const normalizedOrigin = normalizeOrigin(origin);
 
   if (!origin) {
     next();
     return;
   }
 
-  if (!allowedOrigins.has(origin)) {
+  if (!normalizedOrigin || !allowedOrigins.has(normalizedOrigin)) {
     response.status(403).json({ error: 'Origin not allowed.' });
     return;
   }
 
-  response.header('Access-Control-Allow-Origin', origin);
+  response.header('Access-Control-Allow-Origin', normalizedOrigin);
   response.header('Vary', 'Origin');
   response.header('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   response.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -533,6 +534,18 @@ function isSecureOrigin(value: string) {
     return parsed.protocol === 'https:' || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
   } catch {
     return false;
+  }
+}
+
+function normalizeOrigin(value: string | undefined) {
+  if (!value) {
+    return '';
+  }
+
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value.trim().replace(/\/+$/, '');
   }
 }
 

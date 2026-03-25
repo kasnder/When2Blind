@@ -145,35 +145,18 @@ function CreateRoomPage() {
   }
 
   return (
-    <main className="page-shell">
+        <main className="page-shell">
       <section className="panel hero">
         <BrandLockup />
-        <h1>Schedule meetings without exposing your availability</h1>
+        <h1>Privacy-preserving meeting scheduling</h1>
         <p className="lede">
-          Create a poll for possible meeting times, share one participant link, and let people mark when they are
-          free. Availability matching, decryption, and optional Google Calendar import all happen client-side in the browser.
+          Create a meeting-time poll and share one participant link. Availability matching, decryption, and optional
+          Google Calendar import all happen in each participant&apos;s browser, not on the server.
         </p>
         <p className="muted">
-          Rooms auto-delete after {retentionDays ?? 30} days by default. Generated links are shown once here and
-          are not saved unless you explicitly store them in this browser, which is more convenient but less safe.
+          Rooms auto-delete after {retentionDays ?? 30} days. Share the participant link, keep the owner link
+          private, and only save links in this browser if you accept that risk.
         </p>
-
-        <div className="hero-facts">
-          <div className="hero-fact">
-            <p className="hero-fact-title">Private by default</p>
-            <p className="muted">Participant names and availability stay encrypted. The server stores ciphertext, not readable schedules.</p>
-          </div>
-          <div className="hero-fact">
-            <p className="hero-fact-title">Google import stays local</p>
-            <p className="muted">Google Calendar fetching happens in the browser. Tokens stay in memory only and are revoked immediately after import.</p>
-          </div>
-        </div>
-
-        <div className="instruction-strip">
-          <p><strong>1.</strong> Create the room and decide whether to keep local link copies in this browser.</p>
-          <p><strong>2.</strong> Send only the participant link. Keep the owner link private.</p>
-          <p><strong>3.</strong> Reopen the owner link to review overlap or delete the room before expiry.</p>
-        </div>
 
         <form className="form-grid" onSubmit={handleCreateRoom}>
           <label className="field-card field-span-2">
@@ -449,7 +432,6 @@ function OrganizerPage() {
         <button className="danger" disabled={deleting || !sessionToken} onClick={handleDelete}>
           {deleting ? 'Deleting room...' : 'Delete room'}
         </button>
-        <MissingKeyHelp capabilityType="organizer" roomId={roomId} />
       </section>
     </main>
   );
@@ -553,6 +535,17 @@ function ParticipantRoomPage() {
       setIsLoading,
     });
   }, [roomId, sessionToken, encryptionSecret]);
+
+  useEffect(() => {
+    function handlePointerRelease() {
+      dragState.current = { active: false, value: null };
+    }
+
+    window.addEventListener('pointerup', handlePointerRelease);
+    return () => {
+      window.removeEventListener('pointerup', handlePointerRelease);
+    };
+  }, []);
 
   useEffect(() => {
     if (!room || !googleState.accessToken || isImportingGoogle) {
@@ -739,7 +732,6 @@ function ParticipantRoomPage() {
         ) : null}
 
         {isLoading ? <p className="muted">Loading encrypted room data...</p> : null}
-        <MissingKeyHelp capabilityType="participant" roomId={roomId} />
       </section>
     </main>
   );
@@ -765,36 +757,7 @@ function BrandLockup() {
       <img className="brand-logo" src={logoUrl} alt="When2Blind logo" />
       <div>
         <p className="eyebrow">When2Blind</p>
-        <p className="brand-tagline">Private meeting scheduling</p>
       </div>
-    </div>
-  );
-}
-
-function MissingKeyHelp(input: {
-  capabilityType: 'organizer' | 'participant';
-  roomId: string;
-}) {
-  const label = input.capabilityType === 'organizer' ? 'owner' : 'participant';
-  const currentPath = input.capabilityType === 'organizer' ? `/organize/${input.roomId}` : `/rooms/${input.roomId}`;
-  const hasStoredSession = Boolean(input.roomId) && Boolean(loadSession(input.capabilityType, input.roomId));
-  const hasFragmentKey = Boolean(new URLSearchParams(window.location.hash.slice(1)).get('key'));
-
-  if (!hasStoredSession || hasFragmentKey) {
-    return null;
-  }
-
-  return (
-    <div className="info-card">
-      <p className="info-title">Why this happens after F5</p>
-      <p className="muted">
-        Reloading <code>{currentPath}</code> keeps your short-lived session in this browser, but the decryption key
-        lives only in the original link fragment and is not resent after refresh.
-      </p>
-      <p className="muted">
-        To continue, reopen the original {label} link that included <code>#key=...</code>. The server cannot restore
-        that key for you.
-      </p>
     </div>
   );
 }
@@ -1037,8 +1000,10 @@ function AvailabilityGrid(input: {
   onDragEnter?: (slotKey: string) => void;
   onDragEnd?: () => void;
 }) {
+  const [hoveredSlotKey, setHoveredSlotKey] = useState<string | null>(null);
   const exactSet = new Set(input.aggregate.exactMatches);
   const nearCountBySlot = new Map(input.aggregate.nearMatches.map((entry) => [entry.slotKey, entry.freeCount]));
+  const namesBySlot = new Map(input.aggregate.nearMatches.map((entry) => [entry.slotKey, entry.displayNames]));
 
   return (
     <div className="grid-wrap">
@@ -1060,8 +1025,10 @@ function AvailabilityGrid(input: {
               <div className="day-header">{dateLabel}</div>
               {daySlots.map((slot) => {
                 const freeCount = nearCountBySlot.get(slot.key) ?? 0;
+                const displayNames = namesBySlot.get(slot.key) ?? [];
                 const isInteractive = Boolean(input.onToggleSlot);
                 const isSelected = input.selectedAvailability?.[slot.key] ?? false;
+                const showTooltip = hoveredSlotKey === slot.key && displayNames.length > 0;
                 const className = [
                   'slot-cell',
                   isSelected ? 'selected' : '',
@@ -1077,19 +1044,32 @@ function AvailabilityGrid(input: {
                     type="button"
                     className={className}
                     disabled={!isInteractive}
-                    onMouseDown={() => {
+                    onPointerDown={(event) => {
                       if (!input.onToggleSlot) {
                         return;
                       }
+                      event.preventDefault();
                       input.onToggleSlot(slot.key, !isSelected);
                     }}
-                    onMouseEnter={() => input.onDragEnter?.(slot.key)}
-                    onMouseUp={() => input.onDragEnd?.()}
-                    onBlur={() => input.onDragEnd?.()}
-                    title={`${slot.dateLabel} ${slot.timeLabel} | selected=${isSelected} | freeCount=${freeCount}`}
+                    onPointerEnter={() => {
+                      setHoveredSlotKey(slot.key);
+                      input.onDragEnter?.(slot.key);
+                    }}
+                    onPointerLeave={() => setHoveredSlotKey((current) => (current === slot.key ? null : current))}
+                    onFocus={() => setHoveredSlotKey(slot.key)}
+                    onPointerUp={() => input.onDragEnd?.()}
+                    onBlur={() => {
+                      setHoveredSlotKey((current) => (current === slot.key ? null : current));
+                      input.onDragEnd?.();
+                    }}
                   >
                     <span>{slot.timeLabel}</span>
                     <small>{exactSet.has(slot.key) ? 'All free' : freeCount > 0 ? `${freeCount} free` : 'No match'}</small>
+                    {showTooltip ? (
+                      <span className="slot-tooltip" role="tooltip">
+                        {displayNames.join(', ')}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}

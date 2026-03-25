@@ -39,7 +39,7 @@ export type RoomResponse = {
 
 export type RoomAggregate = {
   exactMatches: string[];
-  nearMatches: Array<{ slotKey: string; freeCount: number }>;
+  nearMatches: Array<{ slotKey: string; freeCount: number; displayNames: string[] }>;
   participantCount: number;
 };
 

@@ -68,9 +68,9 @@ button {
 }
 
 .brand-logo {
-  width: 60px;
-  height: 60px;
-  border-radius: 16px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   flex: 0 0 auto;
   box-shadow: 0 12px 24px rgba(24, 37, 58, 0.08);
 }
@@ -82,13 +82,6 @@ button {
   box-shadow: none;
 }
 
-.brand-tagline {
-  margin: 0;
-  color: #4b5d73;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
 .my-rooms-panel {
   margin-top: 1.25rem;
 }
@@ -97,33 +90,21 @@ button {
   padding: 2rem;
 }
 
-.hero-facts,
 .link-grid {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
-.hero-facts {
-  margin-top: 1.5rem;
-}
-
-.hero-fact,
 .generated-link-card {
   padding: 1rem;
   border-radius: 18px;
   background: rgba(240, 245, 250, 0.76);
 }
 
-.hero-fact-title,
 .generated-link-card p,
 .link-card-header h2 {
   margin-bottom: 0.35rem;
-}
-
-.hero-fact-title {
-  font-size: 1rem;
-  font-weight: 700;
 }
 
 .eyebrow {
@@ -418,7 +399,8 @@ button:hover,
   display: flex;
   gap: 0.75rem;
   margin-top: 1rem;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .time-column,
@@ -446,10 +428,13 @@ button:hover,
 .matrix {
   display: flex;
   gap: 0.75rem;
+  overflow: visible;
 }
 
 .day-strip {
   min-width: 145px;
+  position: relative;
+  overflow: visible;
 }
 
 .day-header {
@@ -459,10 +444,18 @@ button:hover,
 .slot-cell {
   min-height: 48px;
   display: grid;
+  position: relative;
+  z-index: 1;
   justify-items: start;
   align-content: center;
   text-align: left;
   background: rgba(243, 245, 248, 0.88);
+  user-select: none;
+}
+
+.slot-cell:hover,
+.slot-cell:focus {
+  z-index: 20;
 }
 
 .slot-cell span {
@@ -471,6 +464,37 @@ button:hover,
 
 .slot-cell small {
   color: #52657c;
+}
+
+.slot-tooltip {
+  position: absolute;
+  left: calc(100% + 0.45rem);
+  top: 50%;
+  z-index: 30;
+  min-width: 140px;
+  max-width: 220px;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  background: #18253a;
+  color: #fff7ea;
+  box-shadow: 0 10px 24px rgba(24, 37, 58, 0.22);
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.35;
+  transform: translateY(-50%);
+  white-space: normal;
+  pointer-events: none;
+}
+
+.slot-tooltip::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  background: #18253a;
+  transform: translateY(-50%) rotate(45deg);
 }
 
 .slot-cell.selected {
