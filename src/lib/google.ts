@@ -3,6 +3,7 @@ export type CalendarListEntry = {
   summary: string;
   primary?: boolean;
   timeZone?: string;
+  backgroundColor?: string;
 };
 
 export type EventItem = {
@@ -52,7 +53,7 @@ export function ensureGoogleIdentityLoaded() {
   return googleScriptPromise;
 }
 
-export async function fetchPrimaryCalendarEvents(accessToken: string, timeMin: string, timeMax: string) {
+export async function fetchGoogleCalendarList(accessToken: string) {
   const calendarList = await fetchGoogle<{ items?: CalendarListEntry[] }>(
     'https://www.googleapis.com/calendar/v3/users/me/calendarList',
     accessToken,
@@ -63,7 +64,19 @@ export async function fetchPrimaryCalendarEvents(accessToken: string, timeMin: s
     throw new Error('No calendars available for this Google account.');
   }
 
-  const calendar = calendars.find((entry) => entry.primary) ?? calendars[0];
+  return calendars;
+}
+
+export async function fetchCalendarEvents(
+  accessToken: string,
+  calendarIds: string[],
+  timeMin: string,
+  timeMax: string,
+) {
+  if (calendarIds.length === 0) {
+    throw new Error('Choose at least one Google Calendar to import.');
+  }
+
   const query = new URLSearchParams({
     singleEvents: 'true',
     orderBy: 'startTime',
@@ -71,14 +84,17 @@ export async function fetchPrimaryCalendarEvents(accessToken: string, timeMin: s
     timeMax,
   });
 
-  const eventsResponse = await fetchGoogle<{ items?: EventItem[] }>(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendar.id)}/events?${query.toString()}`,
-    accessToken,
+  const responses = await Promise.all(
+    calendarIds.map((calendarId) =>
+      fetchGoogle<{ items?: EventItem[] }>(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${query.toString()}`,
+        accessToken,
+      ),
+    ),
   );
 
   return {
-    calendar,
-    events: (eventsResponse.items ?? []).filter((event) => event.status !== 'cancelled'),
+    events: responses.flatMap((response) => (response.items ?? []).filter((event) => event.status !== 'cancelled')),
   };
 }
 

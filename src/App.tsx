@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 import { createRoom, deleteRoom, exchangeSession, fetchRoom, saveSubmission } from './lib/api';
 import { decryptSubmission, encryptSubmission } from './lib/crypto';
-import { ensureGoogleIdentityLoaded, fetchPrimaryCalendarEvents } from './lib/google';
+import { ensureGoogleIdentityLoaded, fetchCalendarEvents, fetchGoogleCalendarList } from './lib/google';
 import { aggregateRoom, availabilityFromGoogleEvents, buildEmptyAvailability, buildRoomSlots, getRoomDateKeys } from './lib/room';
 import logoUrl from './assets/logo-120.png';
 import type { DecryptedSubmission, Room } from './types';
+import type { CalendarListEntry } from './lib/google';
 
 declare global {
   interface Window {
@@ -54,6 +55,11 @@ type CreatedRoomLinks = {
   roomId: string;
   participantLink: string;
   expiresAt: string;
+};
+
+type GoogleCalendarPickerState = {
+  calendars: CalendarListEntry[];
+  selectedIds: string[];
 };
 
 type DecryptedRoomSubmission = DecryptedSubmission & {
@@ -524,8 +530,10 @@ function ParticipantRoomPage() {
     tokenClient: null,
     accessToken: null,
   });
+  const [googleCalendarPicker, setGoogleCalendarPicker] = useState<GoogleCalendarPickerState | null>(null);
   const dragState = useRef<{ active: boolean; value: boolean | null }>({ active: false, value: null });
   const googleAuthInFlightRef = useRef(false);
+  const googleAccessTokenRef = useRef<string | null>(null);
 
   const slots = useMemo(() => (room ? buildRoomSlots(room) : []), [room]);
   const aggregate = useMemo(() => aggregateRoom(slots, decryptedSubmissions), [slots, decryptedSubmissions]);
@@ -585,6 +593,7 @@ function ParticipantRoomPage() {
             }
 
             setGoogleState((current) => ({ ...current, accessToken: response.access_token }));
+            googleAccessTokenRef.current = response.access_token;
           },
           error_callback: (oauthError) => {
             googleAuthInFlightRef.current = false;
@@ -638,40 +647,91 @@ function ParticipantRoomPage() {
 
     let cancelled = false;
     const accessToken = googleState.accessToken;
-    const currentRoom = room;
 
-    async function importGoogleAvailability() {
-      setIsImportingGoogle(true);
+    async function loadGoogleCalendars() {
       try {
-        const slotList = buildRoomSlots(currentRoom);
-        const roomDates = getRoomDateKeys(currentRoom);
-        const timeMin = new Date(`${roomDates[0] ?? currentRoom.startDate}T00:00:00`).toISOString();
-        const timeMax = new Date(`${roomDates.at(-1) ?? currentRoom.endDate}T23:59:59`).toISOString();
-        const { events } = await fetchPrimaryCalendarEvents(accessToken, timeMin, timeMax);
-        const importedAvailability = availabilityFromGoogleEvents(slotList, events, currentRoom.timezone);
+        const calendars = await fetchGoogleCalendarList(accessToken);
         if (!cancelled) {
-          setAvailability(importedAvailability);
+          const orderedCalendars = [...calendars].sort((left, right) => {
+            if (left.primary && !right.primary) {
+              return -1;
+            }
+            if (!left.primary && right.primary) {
+              return 1;
+            }
+            return left.summary.localeCompare(right.summary);
+          });
+          setGoogleCalendarPicker({
+            calendars: orderedCalendars,
+            selectedIds: (orderedCalendars.find((calendar) => calendar.primary)
+              ? orderedCalendars.filter((calendar) => calendar.primary)
+              : orderedCalendars.slice(0, 1)
+            ).map((calendar) => calendar.id),
+          });
+          setIsRequestingGoogleAuth(false);
+          googleAuthInFlightRef.current = false;
         }
       } catch (caught) {
         if (!cancelled) {
-          googleAuthInFlightRef.current = false;
-          setIsRequestingGoogleAuth(false);
           setError(caught instanceof Error ? caught.message : 'Failed to import Google availability.');
+          revokeGoogleAccess(accessToken);
         }
-      } finally {
-        window.google?.accounts.oauth2.revoke(accessToken);
-        setGoogleState((current) => ({ ...current, accessToken: null }));
-        setIsImportingGoogle(false);
-        googleAuthInFlightRef.current = false;
       }
     }
 
-    void importGoogleAvailability();
+    void loadGoogleCalendars();
 
     return () => {
       cancelled = true;
     };
   }, [room, googleState.accessToken]);
+
+  function revokeGoogleAccess(accessToken = googleState.accessToken) {
+    if (accessToken) {
+      window.google?.accounts.oauth2.revoke(accessToken);
+    }
+    googleAccessTokenRef.current = null;
+    setGoogleState((current) => ({ ...current, accessToken: null }));
+    setGoogleCalendarPicker(null);
+    setIsImportingGoogle(false);
+    setIsRequestingGoogleAuth(false);
+    googleAuthInFlightRef.current = false;
+  }
+
+  useEffect(() => {
+    if (!googleCalendarPicker || isImportingGoogle) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        revokeGoogleAccess(googleAccessTokenRef.current);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [googleCalendarPicker, isImportingGoogle]);
+
+  useEffect(() => {
+    function handleBeforeUnload() {
+      if (googleAccessTokenRef.current) {
+        window.google?.accounts.oauth2.revoke(googleAccessTokenRef.current);
+        googleAccessTokenRef.current = null;
+      }
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (googleAccessTokenRef.current) {
+        window.google?.accounts.oauth2.revoke(googleAccessTokenRef.current);
+        googleAccessTokenRef.current = null;
+      }
+    };
+  }, []);
 
   function updateSlot(slotKey: string, nextValue: boolean) {
     setAvailability((current) => ({
@@ -693,6 +753,51 @@ function ParticipantRoomPage() {
     googleAuthInFlightRef.current = true;
     tokenClient.requestAccessToken({ prompt: googleState.accessToken ? '' : 'consent' });
     setIsRequestingGoogleAuth(true);
+  }
+
+  function toggleGoogleCalendar(calendarId: string) {
+    setGoogleCalendarPicker((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const selectedIds = current.selectedIds.includes(calendarId)
+        ? current.selectedIds.filter((id) => id !== calendarId)
+        : [...current.selectedIds, calendarId];
+
+      return {
+        ...current,
+        selectedIds,
+      };
+    });
+  }
+
+  async function handleGoogleImportConfirm() {
+    if (!room || !googleState.accessToken || !googleCalendarPicker) {
+      return;
+    }
+
+    setIsImportingGoogle(true);
+    setError(null);
+    const accessToken = googleState.accessToken;
+
+    try {
+      const slotList = buildRoomSlots(room);
+      const roomDates = getRoomDateKeys(room);
+      const timeMin = new Date(`${roomDates[0] ?? room.startDate}T00:00:00`).toISOString();
+      const timeMax = new Date(`${roomDates.at(-1) ?? room.endDate}T23:59:59`).toISOString();
+      const { events } = await fetchCalendarEvents(accessToken, googleCalendarPicker.selectedIds, timeMin, timeMax);
+      const importedAvailability = availabilityFromGoogleEvents(slotList, events, room.timezone);
+      setAvailability(importedAvailability);
+      revokeGoogleAccess(accessToken);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to import Google availability.');
+      revokeGoogleAccess(accessToken);
+    }
+  }
+
+  function handleGoogleImportCancel() {
+    revokeGoogleAccess();
   }
 
   async function handleSave() {
@@ -805,7 +910,7 @@ function ParticipantRoomPage() {
                     ? 'Waiting for Google...'
                     : isImportingGoogle
                       ? 'Importing from Google...'
-                      : 'Connect Google and import'}
+                      : 'Import Google Calendar securely'}
                 </button>
                 <button onClick={() => setAvailability(buildEmptyAvailability(slots))} disabled={isLoading}>
                   Clear grid
@@ -832,6 +937,62 @@ function ParticipantRoomPage() {
                 dragState.current = { active: false, value: null };
               }}
             />
+
+            {googleCalendarPicker ? (
+              <div
+                className="modal-backdrop"
+                role="presentation"
+                onClick={() => {
+                  if (!isImportingGoogle) {
+                    handleGoogleImportCancel();
+                  }
+                }}
+              >
+                <section
+                  className="modal-card"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="google-import-title"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <p className="eyebrow">Google import</p>
+                  <h2 id="google-import-title">Choose calendars to include</h2>
+                  <p className="muted">
+                    Your Google token is only kept in memory for this import and will be revoked immediately after you
+                    import or cancel.
+                  </p>
+                  <div className="calendar-picker-list">
+                    {googleCalendarPicker.calendars.map((calendar) => (
+                      <label key={calendar.id} className="calendar-picker-item">
+                        <input
+                          type="checkbox"
+                          checked={googleCalendarPicker.selectedIds.includes(calendar.id)}
+                          onChange={() => toggleGoogleCalendar(calendar.id)}
+                          disabled={isImportingGoogle}
+                        />
+                        <span>
+                          {calendar.summary}
+                          {calendar.primary ? ' (primary)' : ''}
+                          {calendar.timeZone ? ` · ${calendar.timeZone}` : ''}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="action-row">
+                    <button
+                      className="primary"
+                      onClick={handleGoogleImportConfirm}
+                      disabled={isImportingGoogle || googleCalendarPicker.selectedIds.length === 0}
+                    >
+                      {isImportingGoogle ? 'Importing from Google...' : 'Import selected calendars'}
+                    </button>
+                    <button onClick={handleGoogleImportCancel} disabled={isImportingGoogle}>
+                      Cancel and revoke access
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
           </>
         ) : null}
 
