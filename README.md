@@ -295,6 +295,12 @@ Build production assets:
 npm run build
 ```
 
+Build the static frontend for GitHub Pages:
+
+```bash
+VITE_API_BASE_URL=https://your-railway-app.up.railway.app VITE_PUBLIC_BASE_PATH=/privacy-meetings/ npm run build:pages
+```
+
 Run the production server:
 
 ```bash
@@ -322,6 +328,19 @@ For a single Railway service, deploy the built React app and API together:
 - set `ALLOWED_ORIGINS` to the same public Railway HTTPS URL
 
 With that setup, Express serves the built `dist` frontend and handles `/api/*` on the same origin, which avoids `405 Method Not Allowed` responses from a static host handling `POST /api/...`.
+
+## GitHub Pages + Railway
+
+To host the static app on GitHub Pages and keep the API on Railway:
+
+- deploy the backend to Railway as usual
+- set Railway `APP_ORIGIN` to your GitHub Pages app URL, for example `https://USERNAME.github.io/privacy-meetings`
+- set Railway `ALLOWED_ORIGINS` to the same GitHub Pages URL
+- in GitHub, add repository variable `VITE_API_BASE_URL` with your Railway API origin, for example `https://your-railway-app.up.railway.app`
+- if you use Google Calendar import, add repository variable `VITE_GOOGLE_CLIENT_ID`
+- enable GitHub Pages with source `GitHub Actions`
+
+The workflow in [`.github/workflows/deploy-pages.yml`](/Users/konrad/Documents/privacy-meetings/.github/workflows/deploy-pages.yml) builds the client with the repository subpath as the Vite base and publishes `dist` to Pages. It also writes a `404.html` copy of `index.html` so direct visits to `/rooms/:roomId` and `/organize/:roomId` keep working on a static host.
 
 ## Files To Know
 

@@ -7,6 +7,8 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite --host 127.0.0.1 --port 5173",
     "dev:server": "tsx watch server/index.ts",
+    "build:client": "tsc -b && vite build",
+    "build:pages": "npm run build:client && cp dist/index.html dist/404.html",
     "build": "tsc -p tsconfig.server.json && tsc -b && vite build",
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
