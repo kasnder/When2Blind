@@ -198,6 +198,9 @@ export function createApp() {
       response.status(201).json({
         room,
         retentionDays: roomTtlDays,
+        organizerCapability: organizerSecret,
+        participantCapability: participantAccessToken,
+        encryptionKey: participantEncryptionSecret,
         organizerLink: `${appOrigin}/organize/${roomId}?cap=${encodeURIComponent(
           organizerSecret,
         )}#key=${encodeURIComponent(participantEncryptionSecret)}`,

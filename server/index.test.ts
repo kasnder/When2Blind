@@ -73,6 +73,9 @@ describe('When2Blind API', () => {
     expect(response.status).toBe(201);
     expect(response.body.room.startHour).toBe(8);
     expect(response.body.room.endHour).toBe(19);
+    expect(response.body.organizerCapability).toBeTruthy();
+    expect(response.body.participantCapability).toBeTruthy();
+    expect(response.body.encryptionKey).toBeTruthy();
     expect(response.body.organizerLink).toContain(`/organize/${response.body.room.id}?cap=`);
     expect(response.body.organizerLink).toContain('#key=');
     expect(response.body.participantLink).toContain(`/rooms/${response.body.room.id}?cap=`);

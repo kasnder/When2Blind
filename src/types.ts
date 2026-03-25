@@ -49,6 +49,9 @@ export type CreateRoomResponse = {
   retentionDays: number;
   organizerLink: string;
   participantLink: string;
+  organizerCapability: string;
+  participantCapability: string;
+  encryptionKey: string;
 };
 
 export type SessionExchangeResponse = {

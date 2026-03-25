@@ -131,10 +131,11 @@ function CreateRoomPage() {
 
     try {
       const response = await createRoom({ title, timezone, selectedDates, startHour, endHour });
+      const participantLink = buildBootstrapLink('participant', response.room.id, response.participantCapability, response.encryptionKey);
       setRetentionDays(response.retentionDays);
       setLinks({
         roomId: response.room.id,
-        participantLink: response.participantLink,
+        participantLink,
         expiresAt: response.room.expiresAt,
       });
       setCopyState(null);
@@ -142,7 +143,7 @@ function CreateRoomPage() {
       if (saveOnDevice) {
         saveLocalOrganizerRoom(response.room.id, {
           title: response.room.title,
-          participantLink: response.participantLink,
+          participantLink,
           expiresAt: response.room.expiresAt,
         });
       }
@@ -1403,6 +1404,39 @@ function saveSubmissionMetadata(roomId: string, value: { submissionId: string; e
   sessionStorage.setItem(`submission:${roomId}`, JSON.stringify(value));
 }
 
+function buildBootstrapLink(
+  capabilityType: 'organizer' | 'participant',
+  roomId: string,
+  capability: string,
+  encryptionKey: string,
+) {
+  const baseUrl = new URL(import.meta.env.BASE_URL, window.location.origin);
+  const path = capabilityType === 'organizer' ? `organize/${roomId}` : `rooms/${roomId}`;
+  const url = new URL(path, baseUrl);
+  url.searchParams.set('cap', capability);
+  url.hash = `key=${encodeURIComponent(encryptionKey)}`;
+  return url.toString();
+}
+
+function normalizeParticipantLink(link: string, roomId: string) {
+  try {
+    const parsed = new URL(link);
+    const expectedBase = new URL(import.meta.env.BASE_URL, window.location.origin);
+
+    if (parsed.origin !== window.location.origin) {
+      return link;
+    }
+
+    const normalized = new URL(expectedBase);
+    normalized.pathname = `${expectedBase.pathname.replace(/\/$/, '')}/rooms/${roomId}`;
+    normalized.search = parsed.search;
+    normalized.hash = parsed.hash;
+    return normalized.toString();
+  } catch {
+    return link;
+  }
+}
+
 function listLocalOrganizerRooms(): LocalOrganizerRoom[] {
   return Object.keys(localStorage)
     .filter((key) => key.startsWith('organizer-room:'))
@@ -1418,12 +1452,23 @@ function listLocalOrganizerRooms(): LocalOrganizerRoom[] {
         if (typeof parsed.title !== 'string' || typeof parsed.participantLink !== 'string') {
           return null;
         }
+        const participantLink = normalizeParticipantLink(parsed.participantLink, roomId);
         if ('organizerLink' in parsed) {
           localStorage.setItem(
             key,
             JSON.stringify({
               title: parsed.title,
-              participantLink: parsed.participantLink,
+              participantLink,
+              expiresAt: parsed.expiresAt,
+              savedAt: parsed.savedAt ?? new Date().toISOString(),
+            }),
+          );
+        } else if (participantLink !== parsed.participantLink) {
+          localStorage.setItem(
+            key,
+            JSON.stringify({
+              title: parsed.title,
+              participantLink,
               expiresAt: parsed.expiresAt,
               savedAt: parsed.savedAt ?? new Date().toISOString(),
             }),
@@ -1432,7 +1477,7 @@ function listLocalOrganizerRooms(): LocalOrganizerRoom[] {
         return {
           roomId,
           title: parsed.title,
-          participantLink: parsed.participantLink,
+          participantLink,
           expiresAt: parsed.expiresAt,
           savedAt: parsed.savedAt ?? new Date().toISOString(),
         };
