@@ -10,17 +10,33 @@ export type RoomSlot = {
   hour: number;
 };
 
-export function buildRoomSlots(room: Room) {
+export function getRoomDateKeys(room: Pick<Room, 'selectedDates' | 'startDate' | 'endDate'>) {
+  const selectedDates = normalizeSelectedDates(room.selectedDates ?? []);
+  if (selectedDates.length > 0) {
+    return selectedDates;
+  }
+
   const normalizedStartDate = normalizeDateKey(room.startDate);
   const normalizedEndDate = normalizeDateKey(room.endDate);
+  const fallbackDates: string[] = [];
+  let dateKey = normalizedStartDate;
+
+  while (dateKey <= normalizedEndDate) {
+    fallbackDates.push(dateKey);
+    dateKey = incrementDate(dateKey);
+  }
+
+  return fallbackDates;
+}
+
+export function buildRoomSlots(room: Room) {
+  const dateKeys = getRoomDateKeys(room);
   const safeTimeZone = normalizeTimeZone(room.timezone);
   const startHour = normalizeHour(room.startHour, 9);
   const endHour = normalizeHour(room.endHour, 17);
   const slots: RoomSlot[] = [];
-  let dateKey = normalizedStartDate;
-  let dayIndex = 0;
 
-  while (dateKey <= normalizedEndDate) {
+  for (const [dayIndex, dateKey] of dateKeys.entries()) {
     for (let hour = startHour; hour < endHour; hour += 1) {
       const slotDate = roomLocalSlotToUtc(dateKey, hour, safeTimeZone);
       slots.push({
@@ -42,9 +58,6 @@ export function buildRoomSlots(room: Room) {
         hour,
       });
     }
-
-    dateKey = incrementDate(dateKey);
-    dayIndex += 1;
   }
 
   return slots;
@@ -169,6 +182,10 @@ function normalizeDateKey(value: string) {
   }
 
   return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeSelectedDates(values: string[]) {
+  return [...new Set(values.map(normalizeDateKey))].sort();
 }
 
 function normalizeTimeZone(value: string) {

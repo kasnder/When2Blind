@@ -168,7 +168,10 @@ export function createApp() {
 
   app.post('/api/rooms', authRateLimit('room_create', 15 * 60_000, 25), async (request, response) => {
     try {
-      const { title, timezone, startDate, endDate, startHour, endHour } = parseCreateRoom(request.body);
+      const { title, timezone, selectedDates, startHour, endHour } = parseCreateRoom(request.body);
+      const sortedDates = [...selectedDates].sort();
+      const startDate = sortedDates[0] ?? '';
+      const endDate = sortedDates.at(-1) ?? startDate;
       const roomId = generateId(18);
       const organizerSecret = generateSecret();
       const participantAccessToken = generateSecret();
@@ -180,6 +183,7 @@ export function createApp() {
         id: roomId,
         title,
         timezone,
+        selectedDates: sortedDates,
         startDate,
         endDate,
         startHour,
@@ -400,6 +404,7 @@ function publicRoom(room: Awaited<ReturnType<typeof findRoomById>> extends infer
     id: room.id,
     title: room.title,
     timezone: room.timezone,
+    selectedDates: room.selectedDates,
     startDate: room.startDate,
     endDate: room.endDate,
     startHour: room.startHour,

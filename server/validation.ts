@@ -31,8 +31,7 @@ export const createRoomSchema = z
   .object({
     title: printableTextSchema,
     timezone: z.string().min(1).max(100),
-    startDate: dateSchema,
-    endDate: dateSchema,
+    selectedDates: z.array(dateSchema).min(1).max(31),
     startHour: z.number().int().min(0).max(23),
     endHour: z.number().int().min(1).max(24),
   })
@@ -47,22 +46,12 @@ export const createRoomSchema = z
       });
     }
 
-    if (value.endDate < value.startDate) {
+    const uniqueDates = new Set(value.selectedDates);
+    if (uniqueDates.size !== value.selectedDates.length) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['endDate'],
-        message: 'End date must be on or after start date.',
-      });
-    }
-
-    const start = new Date(`${value.startDate}T00:00:00Z`);
-    const end = new Date(`${value.endDate}T00:00:00Z`);
-    const diffDays = Math.round((end.getTime() - start.getTime()) / 86_400_000);
-    if (diffDays > 31) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['endDate'],
-        message: 'Room date range must be 31 days or fewer.',
+        path: ['selectedDates'],
+        message: 'Selected dates must be unique.',
       });
     }
 

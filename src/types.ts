@@ -2,6 +2,7 @@ export type Room = {
   id: string;
   title: string;
   timezone: string;
+  selectedDates: string[];
   startDate: string;
   endDate: string;
   startHour: number;

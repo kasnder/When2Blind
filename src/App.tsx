@@ -3,7 +3,7 @@ import { Link, Navigate, Route, Routes, useParams, useSearchParams } from 'react
 import { createRoom, deleteRoom, exchangeSession, fetchRoom, saveSubmission } from './lib/api';
 import { decryptSubmission, encryptSubmission } from './lib/crypto';
 import { ensureGoogleIdentityLoaded, fetchPrimaryCalendarEvents } from './lib/google';
-import { aggregateRoom, availabilityFromGoogleEvents, buildEmptyAvailability, buildRoomSlots } from './lib/room';
+import { aggregateRoom, availabilityFromGoogleEvents, buildEmptyAvailability, buildRoomSlots, getRoomDateKeys } from './lib/room';
 import logoUrl from './assets/logo-120.png';
 import type { DecryptedSubmission, Room } from './types';
 
@@ -58,6 +58,10 @@ type CreatedRoomLinks = {
   expiresAt: string;
 };
 
+type DecryptedRoomSubmission = DecryptedSubmission & {
+  submissionId: string;
+};
+
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
@@ -75,8 +79,8 @@ function App() {
 function CreateRoomPage() {
   const [title, setTitle] = useState('');
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const [startDate, setStartDate] = useState(localDateString(new Date()));
-  const [endDate, setEndDate] = useState(daysFromNow(6));
+  const [selectedDates, setSelectedDates] = useState(() => buildDefaultSelectedDates());
+  const [calendarMonth, setCalendarMonth] = useState(() => monthKeyForDate(buildDefaultSelectedDates()[0] ?? localDateString(new Date())));
   const [startHour, setStartHour] = useState(9);
   const [endHour, setEndHour] = useState(17);
   const [saveOnDevice, setSaveOnDevice] = useState(false);
@@ -86,13 +90,33 @@ function CreateRoomPage() {
   const [savedRooms, setSavedRooms] = useState<LocalOrganizerRoom[]>([]);
   const [retentionDays, setRetentionDays] = useState<number | null>(null);
   const [copyState, setCopyState] = useState<'organizer' | 'participant' | null>(null);
+  const dateDragState = useRef<{ active: boolean; value: boolean | null; anchorDateKey: string | null }>({
+    active: false,
+    value: null,
+    anchorDateKey: null,
+  });
 
   useEffect(() => {
     setSavedRooms(listLocalOrganizerRooms());
   }, []);
 
+  useEffect(() => {
+    function handlePointerRelease() {
+      dateDragState.current = { active: false, value: null, anchorDateKey: null };
+    }
+
+    window.addEventListener('pointerup', handlePointerRelease);
+    return () => {
+      window.removeEventListener('pointerup', handlePointerRelease);
+    };
+  }, []);
+
   async function handleCreateRoom(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (selectedDates.length === 0) {
+      setError('Choose at least one possible date.');
+      return;
+    }
     if (startHour >= endHour) {
       setError('Daily end hour must be after the start hour.');
       return;
@@ -102,7 +126,7 @@ function CreateRoomPage() {
     setError(null);
 
     try {
-      const response = await createRoom({ title, timezone, startDate, endDate, startHour, endHour });
+      const response = await createRoom({ title, timezone, selectedDates, startHour, endHour });
       setRetentionDays(response.retentionDays);
       setLinks({
         roomId: response.room.id,
@@ -158,54 +182,113 @@ function CreateRoomPage() {
           private, and only save links in this browser if you accept that risk.
         </p>
 
-        <form className="form-grid" onSubmit={handleCreateRoom}>
-          <label className="field-card field-span-2">
-            <span>Room title</span>
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Board meeting, hiring interview, research sync"
-              required
+        <form className="create-room-layout" onSubmit={handleCreateRoom}>
+          <div className="create-room-main">
+            <label className="field-card">
+              <span>Room title</span>
+              <input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Board meeting, hiring interview, research sync"
+                required
+              />
+            </label>
+
+            <div className="time-fields">
+              <label className="field-card">
+                <span>Daily start hour</span>
+                <select value={startHour} onChange={(event) => setStartHour(Number(event.target.value))}>
+                  {hourOptions.slice(0, 24).map((hour) => (
+                    <option key={hour} value={hour}>
+                      {formatHour(hour)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field-card">
+                <span>Daily end hour</span>
+                <select value={endHour} onChange={(event) => setEndHour(Number(event.target.value))}>
+                  {hourOptions.slice(1).map((hour) => (
+                    <option key={hour} value={hour}>
+                      {formatHour(hour)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="checkbox-card">
+              <input type="checkbox" checked={saveOnDevice} onChange={(event) => setSaveOnDevice(event.target.checked)} />
+              <span>
+                Save organizer and participant links on this device
+                <small className="muted">Convenient, but less safe if other people can access this browser profile.</small>
+              </span>
+            </label>
+
+            <button className="primary submit-button" disabled={isSaving}>
+              {isSaving ? 'Creating room...' : 'Create room'}
+            </button>
+          </div>
+
+          <div className="field-card date-picker-card">
+            <div className="date-picker-header">
+              <div>
+                <span>Possible dates</span>
+                <p className="muted">
+                  Select any combination of dates, like a specific-dates poll instead of one continuous range.
+                </p>
+              </div>
+              <div className="date-picker-summary">
+                <strong>{selectedDates.length}</strong>
+                <span>{selectedDates.length === 1 ? 'date selected' : 'dates selected'}</span>
+              </div>
+            </div>
+            <SpecificDatePicker
+              selectedDates={selectedDates}
+              monthKey={calendarMonth}
+              onMonthChange={setCalendarMonth}
+              onToggleDate={(dateKey, nextValue) => {
+                dateDragState.current = { active: true, value: nextValue, anchorDateKey: dateKey };
+                setSelectedDates((current) => setSelectedDateValue(current, dateKey, nextValue));
+              }}
+              onDragEnter={(dateKey) => {
+                if (
+                  dateDragState.current.active &&
+                  dateDragState.current.value !== null &&
+                  dateDragState.current.anchorDateKey
+                ) {
+                  const calendarDays = buildCalendarDays(new Date(`${calendarMonth}-01T00:00:00`));
+                  setSelectedDates((current) =>
+                    applyDateRangeValue(
+                      current,
+                      getDateKeysInRectangle(calendarDays, dateDragState.current.anchorDateKey!, dateKey),
+                      dateDragState.current.value!,
+                    ),
+                  );
+                }
+              }}
+              onDragEnd={() => {
+                dateDragState.current = { active: false, value: null, anchorDateKey: null };
+              }}
             />
-          </label>
-          <label className="field-card">
-            <span>Start date</span>
-            <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required />
-          </label>
-          <label className="field-card">
-            <span>End date</span>
-            <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} required />
-          </label>
-          <label className="field-card">
-            <span>Daily start hour</span>
-            <select value={startHour} onChange={(event) => setStartHour(Number(event.target.value))}>
-              {hourOptions.slice(0, 24).map((hour) => (
-                <option key={hour} value={hour}>
-                  {formatHour(hour)}
-                </option>
+            <div className="selected-date-list" aria-live="polite">
+              {selectedDates.map((dateKey) => (
+                <button
+                  key={dateKey}
+                  type="button"
+                  className="selected-date-chip"
+                  onClick={() => setSelectedDates((current) => current.filter((value) => value !== dateKey))}
+                >
+                  {formatDateChip(dateKey)} x
+                </button>
               ))}
-            </select>
-          </label>
-          <label className="field-card">
-            <span>Daily end hour</span>
-            <select value={endHour} onChange={(event) => setEndHour(Number(event.target.value))}>
-              {hourOptions.slice(1).map((hour) => (
-                <option key={hour} value={hour}>
-                  {formatHour(hour)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="checkbox-card field-span-2">
-            <input type="checkbox" checked={saveOnDevice} onChange={(event) => setSaveOnDevice(event.target.checked)} />
-            <span>
-              Save organizer and participant links on this device
-              <small className="muted">Convenient, but less safe if other people can access this browser profile.</small>
-            </span>
-          </label>
-          <button className="primary submit-button" disabled={isSaving}>
-            {isSaving ? 'Creating room...' : 'Create room'}
-          </button>
+              {selectedDates.length > 0 ? (
+                <button type="button" className="selected-date-chip clear-chip" onClick={() => setSelectedDates([])}>
+                  Clear dates
+                </button>
+              ) : null}
+            </div>
+          </div>
         </form>
 
         {error ? <p className="error-banner">{error}</p> : null}
@@ -316,7 +399,7 @@ function OrganizerPage() {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [encryptionSecret, setEncryptionSecret] = useState<string | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
-  const [decryptedSubmissions, setDecryptedSubmissions] = useState<DecryptedSubmission[]>([]);
+  const [decryptedSubmissions, setDecryptedSubmissions] = useState<DecryptedRoomSubmission[]>([]);
   const [retentionDays, setRetentionDays] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -412,8 +495,8 @@ function OrganizerPage() {
                 <dd>{room.timezone}</dd>
               </div>
               <div>
-                <dt>Date range</dt>
-                <dd>{room.startDate} to {room.endDate}</dd>
+                <dt>Selected dates</dt>
+                <dd>{summarizeRoomDates(room)}</dd>
               </div>
               <div>
                 <dt>Participants</dt>
@@ -463,6 +546,17 @@ function ParticipantRoomPage() {
 
   const slots = useMemo(() => (room ? buildRoomSlots(room) : []), [room]);
   const aggregate = useMemo(() => aggregateRoom(slots, decryptedSubmissions), [slots, decryptedSubmissions]);
+  const ownSubmissionId = useMemo(() => getSubmissionMetadata(roomId)?.submissionId ?? null, [roomId, decryptedSubmissions]);
+  const aggregateWithoutOwnSubmission = useMemo(
+    () =>
+      aggregateRoom(
+        slots,
+        ownSubmissionId
+          ? decryptedSubmissions.filter((submission) => submission.submissionId !== ownSubmissionId)
+          : decryptedSubmissions,
+      ),
+    [slots, decryptedSubmissions, ownSubmissionId],
+  );
   useEffect(() => {
     if (!roomId) {
       setError('Missing room id.');
@@ -567,8 +661,9 @@ function ParticipantRoomPage() {
       setIsImportingGoogle(true);
       try {
         const slotList = buildRoomSlots(currentRoom);
-        const timeMin = new Date(`${currentRoom.startDate}T00:00:00`).toISOString();
-        const timeMax = new Date(`${currentRoom.endDate}T23:59:59`).toISOString();
+        const roomDates = getRoomDateKeys(currentRoom);
+        const timeMin = new Date(`${roomDates[0] ?? currentRoom.startDate}T00:00:00`).toISOString();
+        const timeMax = new Date(`${roomDates.at(-1) ?? currentRoom.endDate}T23:59:59`).toISOString();
         const { events } = await fetchPrimaryCalendarEvents(accessToken, timeMin, timeMax);
         const importedAvailability = availabilityFromGoogleEvents(slotList, events, currentRoom.timezone);
         if (!cancelled) {
@@ -697,8 +792,8 @@ function ParticipantRoomPage() {
                 <dd>{room.timezone}</dd>
               </div>
               <div>
-                <dt>Date range</dt>
-                <dd>{room.startDate} to {room.endDate}</dd>
+                <dt>Selected dates</dt>
+                <dd>{summarizeRoomDates(room)}</dd>
               </div>
               <div>
                 <dt>Participants</dt>
@@ -738,7 +833,7 @@ function ParticipantRoomPage() {
             <AvailabilityGrid
               room={room}
               slots={slots}
-              aggregate={aggregate}
+              aggregate={aggregateWithoutOwnSubmission}
               selectedAvailability={availability}
               currentParticipantLabel={displayName.trim() || 'You'}
               onToggleSlot={(slotKey, nextValue) => {
@@ -836,7 +931,7 @@ async function loadRoom(
   handlers: {
     setRoom: (room: Room) => void;
     setRetentionDays: (value: number) => void;
-    setDecryptedSubmissions: (value: DecryptedSubmission[]) => void;
+    setDecryptedSubmissions: (value: DecryptedRoomSubmission[]) => void;
     setDisplayName: (value: string) => void;
     setAvailability: (value: Record<string, boolean>) => void;
     setError: (value: string | null) => void;
@@ -850,7 +945,10 @@ async function loadRoom(
     const response = await fetchRoom(roomId, sessionToken);
     handlers.setRetentionDays(response.retentionDays);
     const decrypted = await Promise.all(
-      response.submissions.map((submission) => decryptSubmission(roomId, encryptionSecret, submission.envelope)),
+      response.submissions.map(async (submission) => ({
+        ...(await decryptSubmission(roomId, encryptionSecret, submission.envelope)),
+        submissionId: submission.id,
+      })),
     );
 
     const nextSlots = buildRoomSlots(response.room);
@@ -886,10 +984,197 @@ async function loadRoom(
   }
 }
 
-function daysFromNow(days: number) {
-  const value = new Date();
-  value.setDate(value.getDate() + days);
-  return localDateString(value);
+function SpecificDatePicker(input: {
+  selectedDates: string[];
+  monthKey: string;
+  onMonthChange: (value: string) => void;
+  onToggleDate: (dateKey: string, nextValue: boolean) => void;
+  onDragEnter: (dateKey: string) => void;
+  onDragEnd: () => void;
+}) {
+  const monthStart = new Date(`${input.monthKey}-01T00:00:00`);
+  const calendarDays = buildCalendarDays(monthStart);
+  const selectedSet = new Set(input.selectedDates);
+
+  return (
+    <div className="date-picker-grid">
+      <div className="date-picker-nav">
+        <button type="button" onClick={() => input.onMonthChange(shiftMonth(input.monthKey, -1))}>
+          Prev
+        </button>
+        <strong>{formatMonthHeading(monthStart)}</strong>
+        <button type="button" onClick={() => input.onMonthChange(shiftMonth(input.monthKey, 1))}>
+          Next
+        </button>
+      </div>
+      <div className="date-picker-actions">
+        <button type="button" onClick={() => input.onMonthChange(monthKeyForDate(localDateString(new Date())))}>
+          Today
+        </button>
+      </div>
+      <div className="weekday-row">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+          <span key={day}>{day}</span>
+        ))}
+      </div>
+      <div className="calendar-grid">
+        {calendarDays.map((day) => {
+          const isSelected = selectedSet.has(day.dateKey);
+          return (
+            <button
+              key={day.dateKey}
+              type="button"
+              className={`calendar-day${day.inMonth ? '' : ' outside-month'}${isSelected ? ' selected-day' : ''}`}
+              aria-pressed={isSelected}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                input.onToggleDate(day.dateKey, !isSelected);
+              }}
+              onPointerEnter={() => input.onDragEnter(day.dateKey)}
+              onPointerUp={input.onDragEnd}
+              onBlur={input.onDragEnd}
+            >
+              <span>{day.dayNumber}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function buildDefaultSelectedDates() {
+  const today = new Date();
+  return Array.from({ length: 7 }, (_, offset) => {
+    const value = new Date(today);
+    value.setDate(today.getDate() + offset);
+    return localDateString(value);
+  });
+}
+
+function setSelectedDateValue(current: string[], dateKey: string, nextValue: boolean) {
+  const isSelected = current.includes(dateKey);
+
+  if (nextValue === isSelected) {
+    return current;
+  }
+
+  if (!nextValue) {
+    return current.filter((value) => value !== dateKey);
+  }
+
+  if (current.length >= 31) {
+    return current;
+  }
+
+  return [...current, dateKey].sort();
+}
+
+function applyDateRangeValue(current: string[], dateKeys: string[], nextValue: boolean) {
+  const currentSet = new Set(current);
+
+  if (!nextValue) {
+    for (const dateKey of dateKeys) {
+      currentSet.delete(dateKey);
+    }
+    return [...currentSet].sort();
+  }
+
+  const missingDateKeys = dateKeys.filter((dateKey) => !currentSet.has(dateKey));
+  const remainingCapacity = 31 - currentSet.size;
+  for (const dateKey of missingDateKeys.slice(0, Math.max(remainingCapacity, 0))) {
+    currentSet.add(dateKey);
+  }
+
+  return [...currentSet].sort();
+}
+
+function getDateKeysInRectangle(
+  calendarDays: Array<{ dateKey: string }>,
+  startDateKey: string,
+  endDateKey: string,
+) {
+  const indexByDate = new Map(calendarDays.map((day, index) => [day.dateKey, index]));
+  const startIndex = indexByDate.get(startDateKey);
+  const endIndex = indexByDate.get(endDateKey);
+
+  if (startIndex === undefined || endIndex === undefined) {
+    return [startDateKey];
+  }
+
+  const startRow = Math.floor(startIndex / 7);
+  const startColumn = startIndex % 7;
+  const endRow = Math.floor(endIndex / 7);
+  const endColumn = endIndex % 7;
+  const minRow = Math.min(startRow, endRow);
+  const maxRow = Math.max(startRow, endRow);
+  const minColumn = Math.min(startColumn, endColumn);
+  const maxColumn = Math.max(startColumn, endColumn);
+  const dateKeys: string[] = [];
+
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      const day = calendarDays[row * 7 + column];
+      if (day) {
+        dateKeys.push(day.dateKey);
+      }
+    }
+  }
+
+  return dateKeys;
+}
+
+function buildCalendarDays(monthStart: Date) {
+  const start = new Date(monthStart);
+  start.setDate(1 - monthStart.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const value = new Date(start);
+    value.setDate(start.getDate() + index);
+    return {
+      dateKey: localDateString(value),
+      dayNumber: value.getDate(),
+      inMonth: value.getMonth() === monthStart.getMonth(),
+    };
+  });
+}
+
+function shiftMonth(monthKey: string, offset: number) {
+  const [year, month] = monthKey.split('-').map(Number);
+  const value = new Date(year, month - 1 + offset, 1);
+  return monthKeyForDate(localDateString(value));
+}
+
+function monthKeyForDate(dateKey: string) {
+  return dateKey.slice(0, 7);
+}
+
+function formatMonthHeading(value: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'long',
+    year: 'numeric',
+  }).format(value);
+}
+
+function formatDateChip(dateKey: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(`${dateKey}T12:00:00`));
+}
+
+function summarizeRoomDates(room: Pick<Room, 'selectedDates' | 'startDate' | 'endDate'>) {
+  const roomDates = getRoomDateKeys(room);
+  if (roomDates.length === 0) {
+    return 'No dates selected';
+  }
+
+  if (roomDates.length <= 4) {
+    return roomDates.map(formatDateChip).join(', ');
+  }
+
+  return `${roomDates.length} dates from ${formatDateChip(roomDates[0])} to ${formatDateChip(roomDates.at(-1) ?? roomDates[0])}`;
 }
 
 const hourOptions = Array.from({ length: 25 }, (_, hour) => hour);

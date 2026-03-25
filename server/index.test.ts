@@ -35,6 +35,7 @@ const envelope = {
   nonce: 'nonce_payload_value_1234',
   ciphertext: 'ciphertext_payload_value_1234',
 };
+const selectedDates = ['2026-03-24', '2026-03-27', '2026-03-30'];
 
 describe('When2Blind API', () => {
   beforeEach(() => {
@@ -49,6 +50,7 @@ describe('When2Blind API', () => {
       id: String(input.id),
       title: 'Team sync',
       timezone: 'Europe/Amsterdam',
+      selectedDates,
       startDate: '2026-03-24',
       endDate: '2026-03-30',
       startHour: Number(input.startHour),
@@ -63,8 +65,7 @@ describe('When2Blind API', () => {
       .send({
         title: 'Team sync',
         timezone: 'Europe/Amsterdam',
-        startDate: '2026-03-24',
-        endDate: '2026-03-30',
+        selectedDates,
         startHour: 8,
         endHour: 19,
       });
@@ -84,8 +85,7 @@ describe('When2Blind API', () => {
       .send({
         title: 'Team sync',
         timezone: 'Europe/Amsterdam',
-        startDate: '2026-03-24',
-        endDate: '2026-03-30',
+        selectedDates,
         startHour: 18,
         endHour: 9,
       });
@@ -99,6 +99,7 @@ describe('When2Blind API', () => {
       id: 'room-1',
       title: 'Team sync',
       timezone: 'Europe/Amsterdam',
+      selectedDates,
       startDate: '2026-03-24',
       endDate: '2026-03-30',
       startHour: 9,
@@ -144,6 +145,7 @@ describe('When2Blind API', () => {
       id: 'room-1',
       title: 'Team sync',
       timezone: 'Europe/Amsterdam',
+      selectedDates,
       startDate: '2026-03-24',
       endDate: '2026-03-30',
       startHour: 9,
@@ -187,6 +189,7 @@ describe('When2Blind API', () => {
       id: 'room-1',
       title: 'Team sync',
       timezone: 'Europe/Amsterdam',
+      selectedDates,
       startDate: '2026-03-24',
       endDate: '2026-03-30',
       startHour: 9,
@@ -230,6 +233,7 @@ describe('When2Blind API', () => {
       id: 'room-1',
       title: 'Team sync',
       timezone: 'Europe/Amsterdam',
+      selectedDates,
       startDate: '2026-03-24',
       endDate: '2026-03-30',
       startHour: 9,
@@ -284,6 +288,7 @@ describe('When2Blind API', () => {
       id: 'room-1',
       title: 'Team sync',
       timezone: 'Europe/Amsterdam',
+      selectedDates,
       startDate: '2026-03-24',
       endDate: '2026-03-30',
       startHour: 9,

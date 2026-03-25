@@ -4,6 +4,7 @@ export type RoomRecord = {
   id: string;
   title: string;
   timezone: string;
+  selectedDates: string[];
   startDate: string;
   endDate: string;
   startHour: number;
@@ -77,6 +78,15 @@ export async function ensureSchema() {
 
   await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS start_hour INTEGER NOT NULL DEFAULT 9`);
   await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS end_hour INTEGER NOT NULL DEFAULT 17`);
+  await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS selected_dates DATE[]`);
+  await pool.query(`
+    UPDATE rooms
+    SET selected_dates = ARRAY(
+      SELECT value::date
+      FROM generate_series(start_date, end_date, INTERVAL '1 day') AS value
+    )
+    WHERE selected_dates IS NULL OR cardinality(selected_dates) = 0
+  `);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS submissions (
@@ -106,6 +116,7 @@ export async function createRoom(input: {
   id: string;
   title: string;
   timezone: string;
+  selectedDates: string[];
   startDate: string;
   endDate: string;
   startHour: number;
@@ -118,14 +129,19 @@ export async function createRoom(input: {
   const result = await pool.query<RoomRecord>(
     `
       INSERT INTO rooms (
-        id, title, timezone, start_date, end_date, start_hour, end_hour, slot_minutes,
+        id, title, timezone, selected_dates, start_date, end_date, start_hour, end_hour, slot_minutes,
         expires_at, participant_access_hash, organizer_secret_hash
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4::date[], $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING
         id,
         title,
         timezone,
+        ARRAY(
+          SELECT to_char(value, 'YYYY-MM-DD')
+          FROM unnest(selected_dates) AS value
+          ORDER BY value
+        ) AS "selectedDates",
         start_date::text AS "startDate",
         end_date::text AS "endDate",
         start_hour AS "startHour",
@@ -138,6 +154,7 @@ export async function createRoom(input: {
       input.id,
       input.title,
       input.timezone,
+      input.selectedDates,
       input.startDate,
       input.endDate,
       input.startHour,
@@ -164,6 +181,11 @@ export async function findRoomById(id: string) {
         id,
         title,
         timezone,
+        ARRAY(
+          SELECT to_char(value, 'YYYY-MM-DD')
+          FROM unnest(selected_dates) AS value
+          ORDER BY value
+        ) AS "selectedDates",
         start_date::text AS "startDate",
         end_date::text AS "endDate",
         start_hour AS "startHour",

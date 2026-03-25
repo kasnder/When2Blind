@@ -36,8 +36,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function createRoom(input: {
   title: string;
   timezone: string;
-  startDate: string;
-  endDate: string;
+  selectedDates: string[];
   startHour: number;
   endHour: number;
 }) {

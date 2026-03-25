@@ -6,6 +6,7 @@ const room: Room = {
   id: 'room-1',
   title: 'Planning',
   timezone: 'Europe/Amsterdam',
+  selectedDates: ['2026-03-24', '2026-03-25'],
   startDate: '2026-03-24',
   endDate: '2026-03-25',
   startHour: 9,
@@ -52,6 +53,7 @@ describe('room slots', () => {
   it('accepts legacy ISO timestamp room dates without crashing', () => {
     const slots = buildRoomSlots({
       ...room,
+      selectedDates: [],
       startDate: '2026-03-23T23:00:00.000Z',
       endDate: '2026-03-29T22:00:00.000Z',
     });
@@ -63,6 +65,7 @@ describe('room slots', () => {
   it('falls back safely when the room timezone is invalid', () => {
     const slots = buildRoomSlots({
       ...room,
+      selectedDates: ['2026-03-24'],
       timezone: 'Not/A_Real_Time_Zone',
       startDate: '2026-03-24',
       endDate: '2026-03-24',
@@ -75,6 +78,7 @@ describe('room slots', () => {
   it('respects room-level daily start and end hours', () => {
     const slots = buildRoomSlots({
       ...room,
+      selectedDates: ['2026-03-24'],
       startHour: 6,
       endHour: 12,
       startDate: '2026-03-24',
@@ -89,6 +93,7 @@ describe('room slots', () => {
   it('marks partial overlaps using the room timezone instead of the host timezone', () => {
     const slots = buildRoomSlots({
       ...room,
+      selectedDates: ['2026-03-24'],
       startDate: '2026-03-24',
       endDate: '2026-03-24',
     });
@@ -112,6 +117,7 @@ describe('room slots', () => {
   it('treats all-day events as busy for the entire room day', () => {
     const slots = buildRoomSlots({
       ...room,
+      selectedDates: ['2026-03-24'],
       startDate: '2026-03-24',
       endDate: '2026-03-24',
     });
@@ -133,6 +139,7 @@ describe('room slots', () => {
   it('computes exact and near matches from decrypted submissions', () => {
     const slots = buildRoomSlots({
       ...room,
+      selectedDates: ['2026-03-24'],
       startDate: '2026-03-24',
       endDate: '2026-03-24',
     });
@@ -157,11 +164,11 @@ describe('room slots', () => {
     expect(aggregate.participantCount).toBe(2);
     expect(aggregate.exactMatches).toContain('2026-03-24T09:00');
     expect(aggregate.exactMatches).not.toContain('2026-03-24T10:00');
-    expect(aggregate.nearMatches[0]).toEqual({ slotKey: '2026-03-24T09:00', freeCount: 2 });
+    expect(aggregate.nearMatches[0]).toEqual({ slotKey: '2026-03-24T09:00', freeCount: 2, displayNames: ['A', 'B'] });
     expect(aggregate.nearMatches).toEqual(
       expect.arrayContaining([
-        { slotKey: '2026-03-24T10:00', freeCount: 1 },
-        { slotKey: '2026-03-24T11:00', freeCount: 1 },
+        { slotKey: '2026-03-24T10:00', freeCount: 1, displayNames: ['A'] },
+        { slotKey: '2026-03-24T11:00', freeCount: 1, displayNames: ['B'] },
       ]),
     );
   });

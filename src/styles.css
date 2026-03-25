@@ -139,16 +139,28 @@ h2 {
   color: #4b5d73;
 }
 
-.form-grid,
 .controls {
   display: grid;
   gap: 1rem;
 }
 
-.form-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  align-items: end;
+.create-room-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(420px, 1fr);
+  gap: 1rem;
   margin-top: 1.4rem;
+}
+
+.create-room-main {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.time-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
 }
 
 .instruction-strip {
@@ -179,14 +191,132 @@ label span {
 }
 
 .field-card {
-  align-self: stretch;
+  align-self: start;
   padding: 0.9rem;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.52);
 }
 
-.field-span-2 {
-  grid-column: span 2;
+.date-picker-card {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.date-picker-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 1rem;
+}
+
+.date-picker-header p {
+  margin: 0.35rem 0 0;
+}
+
+.date-picker-summary {
+  min-width: 7rem;
+  align-self: start;
+  padding: 0.8rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(240, 245, 250, 0.9);
+  text-align: center;
+}
+
+.date-picker-summary strong,
+.date-picker-summary span {
+  display: block;
+}
+
+.date-picker-summary strong {
+  font-size: 1.45rem;
+}
+
+.date-picker-summary span {
+  font-size: 0.82rem;
+  color: #4b5d73;
+}
+
+.date-picker-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.date-picker-nav,
+.weekday-row,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.date-picker-nav {
+  align-items: center;
+}
+
+.date-picker-nav button {
+  min-width: 0;
+  padding-inline: 0.75rem;
+}
+
+.date-picker-nav strong {
+  grid-column: span 5;
+  text-align: center;
+  min-width: 0;
+}
+
+.date-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.weekday-row span {
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #6a7890;
+  text-transform: uppercase;
+}
+
+.calendar-day {
+  min-height: 3.25rem;
+  padding: 0.65rem 0.4rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(24, 37, 58, 0.08);
+  user-select: none;
+  touch-action: none;
+}
+
+.calendar-day span {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.calendar-day.outside-month {
+  background: rgba(240, 245, 250, 0.65);
+  color: #7d8ba2;
+}
+
+.calendar-day.selected-day {
+  background: #18253a;
+  color: #fff6e8;
+}
+
+.selected-date-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.selected-date-chip {
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(240, 245, 250, 0.95);
+}
+
+.clear-chip {
+  background: rgba(255, 238, 214, 0.95);
 }
 
 .checkbox-card {
@@ -196,6 +326,12 @@ label span {
   padding: 1rem;
   border-radius: 18px;
   background: rgba(240, 245, 250, 0.76);
+  align-self: start;
+}
+
+.submit-button {
+  width: fit-content;
+  min-width: 12rem;
 }
 
 .checkbox-card input {
@@ -535,16 +671,14 @@ button:hover,
   }
 
   .section-header,
-  .link-card-header {
+  .link-card-header,
+  .date-picker-header {
     align-items: start;
     flex-direction: column;
   }
 
-  .form-grid {
+  .create-room-layout,
+  .time-fields {
     grid-template-columns: 1fr;
-  }
-
-  .field-span-2 {
-    grid-column: auto;
   }
 }
