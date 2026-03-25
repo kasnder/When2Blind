@@ -91,6 +91,10 @@ export function aggregateRoom(slots: RoomSlot[], submissions: DecryptedSubmissio
 }
 
 function eventOverlaps(event: EventItem, slotStart: Date, slotEnd: Date) {
+  if (event.transparency === 'transparent') {
+    return false;
+  }
+
   const startValue = event.start?.dateTime ?? event.start?.date;
   const endValue = event.end?.dateTime ?? event.end?.date;
   if (!startValue || !endValue) {

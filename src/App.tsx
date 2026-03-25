@@ -449,6 +449,7 @@ function ParticipantRoomPage() {
   const [availability, setAvailability] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRequestingGoogleAuth, setIsRequestingGoogleAuth] = useState(false);
   const [isImportingGoogle, setIsImportingGoogle] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retentionDays, setRetentionDays] = useState<number | null>(null);
@@ -458,10 +459,10 @@ function ParticipantRoomPage() {
     accessToken: null,
   });
   const dragState = useRef<{ active: boolean; value: boolean | null }>({ active: false, value: null });
+  const googleAuthInFlightRef = useRef(false);
 
   const slots = useMemo(() => (room ? buildRoomSlots(room) : []), [room]);
   const aggregate = useMemo(() => aggregateRoom(slots, decryptedSubmissions), [slots, decryptedSubmissions]);
-
   useEffect(() => {
     if (!roomId) {
       setError('Missing room id.');
@@ -499,6 +500,8 @@ function ParticipantRoomPage() {
           client_id: clientId,
           scope: CALENDAR_SCOPE,
           callback: (response) => {
+            googleAuthInFlightRef.current = false;
+            setIsRequestingGoogleAuth(false);
             if (response.error) {
               setError(response.error_description ?? response.error);
               return;
@@ -506,7 +509,11 @@ function ParticipantRoomPage() {
 
             setGoogleState((current) => ({ ...current, accessToken: response.access_token }));
           },
-          error_callback: (oauthError) => setError(`Google OAuth error: ${oauthError.type}`),
+          error_callback: (oauthError) => {
+            googleAuthInFlightRef.current = false;
+            setIsRequestingGoogleAuth(false);
+            setError(`Google OAuth error: ${oauthError.type}`);
+          },
         });
 
         setGoogleState((current) => ({ ...current, ready: true, tokenClient }));
@@ -548,7 +555,7 @@ function ParticipantRoomPage() {
   }, []);
 
   useEffect(() => {
-    if (!room || !googleState.accessToken || isImportingGoogle) {
+    if (!room || !googleState.accessToken) {
       return;
     }
 
@@ -563,17 +570,21 @@ function ParticipantRoomPage() {
         const timeMin = new Date(`${currentRoom.startDate}T00:00:00`).toISOString();
         const timeMax = new Date(`${currentRoom.endDate}T23:59:59`).toISOString();
         const { events } = await fetchPrimaryCalendarEvents(accessToken, timeMin, timeMax);
+        const importedAvailability = availabilityFromGoogleEvents(slotList, events, currentRoom.timezone);
         if (!cancelled) {
-          setAvailability(availabilityFromGoogleEvents(slotList, events, currentRoom.timezone));
+          setAvailability(importedAvailability);
         }
       } catch (caught) {
         if (!cancelled) {
+          googleAuthInFlightRef.current = false;
+          setIsRequestingGoogleAuth(false);
           setError(caught instanceof Error ? caught.message : 'Failed to import Google availability.');
         }
       } finally {
         window.google?.accounts.oauth2.revoke(accessToken);
         setGoogleState((current) => ({ ...current, accessToken: null }));
         setIsImportingGoogle(false);
+        googleAuthInFlightRef.current = false;
       }
     }
 
@@ -582,7 +593,7 @@ function ParticipantRoomPage() {
     return () => {
       cancelled = true;
     };
-  }, [room, googleState.accessToken, isImportingGoogle]);
+  }, [room, googleState.accessToken]);
 
   function updateSlot(slotKey: string, nextValue: boolean) {
     setAvailability((current) => ({
@@ -591,12 +602,19 @@ function ParticipantRoomPage() {
     }));
   }
 
-  async function handleGoogleAutofill() {
-    if (isImportingGoogle) {
+  function handleGoogleAutofill() {
+    if (isImportingGoogle || isRequestingGoogleAuth || googleAuthInFlightRef.current) {
       return;
     }
 
-    googleState.tokenClient?.requestAccessToken({ prompt: googleState.accessToken ? '' : 'consent' });
+    const tokenClient = googleState.tokenClient;
+    if (!tokenClient) {
+      return;
+    }
+
+    googleAuthInFlightRef.current = true;
+    tokenClient.requestAccessToken({ prompt: googleState.accessToken ? '' : 'consent' });
+    setIsRequestingGoogleAuth(true);
   }
 
   async function handleSave() {
@@ -701,8 +719,15 @@ function ParticipantRoomPage() {
                 <button className="primary" onClick={handleSave} disabled={isSaving || isLoading}>
                   {isSaving ? 'Saving encrypted submission...' : 'Save availability'}
                 </button>
-                <button onClick={handleGoogleAutofill} disabled={isLoading || !googleState.ready || isImportingGoogle}>
-                  {isImportingGoogle ? 'Importing from Google...' : 'Connect Google and import'}
+                <button
+                  onClick={handleGoogleAutofill}
+                  disabled={isLoading || !googleState.ready || isImportingGoogle || isRequestingGoogleAuth}
+                >
+                  {isRequestingGoogleAuth
+                    ? 'Waiting for Google...'
+                    : isImportingGoogle
+                      ? 'Importing from Google...'
+                      : 'Connect Google and import'}
                 </button>
                 <button onClick={() => setAvailability(buildEmptyAvailability(slots))} disabled={isLoading}>
                   Clear grid
@@ -715,6 +740,7 @@ function ParticipantRoomPage() {
               slots={slots}
               aggregate={aggregate}
               selectedAvailability={availability}
+              currentParticipantLabel={displayName.trim() || 'You'}
               onToggleSlot={(slotKey, nextValue) => {
                 dragState.current = { active: true, value: nextValue };
                 updateSlot(slotKey, nextValue);
@@ -827,11 +853,11 @@ async function loadRoom(
       response.submissions.map((submission) => decryptSubmission(roomId, encryptionSecret, submission.envelope)),
     );
 
-    handlers.setRoom(response.room);
-    handlers.setDecryptedSubmissions(decrypted);
     const nextSlots = buildRoomSlots(response.room);
     const defaultAvailability = buildEmptyAvailability(nextSlots);
     if (handlers.hydrateOwnSubmission === false) {
+      handlers.setRoom(response.room);
+      handlers.setDecryptedSubmissions(decrypted);
       return;
     }
 
@@ -850,6 +876,9 @@ async function loadRoom(
     } else {
       handlers.setAvailability(defaultAvailability);
     }
+
+    handlers.setRoom(response.room);
+    handlers.setDecryptedSubmissions(decrypted);
   } catch (caught) {
     handlers.setError(caught instanceof Error ? caught.message : 'Failed to load room.');
   } finally {
@@ -996,6 +1025,7 @@ function AvailabilityGrid(input: {
   slots: ReturnType<typeof buildRoomSlots>;
   aggregate: ReturnType<typeof aggregateRoom>;
   selectedAvailability?: Record<string, boolean>;
+  currentParticipantLabel?: string;
   onToggleSlot?: (slotKey: string, nextValue: boolean) => void;
   onDragEnter?: (slotKey: string) => void;
   onDragEnd?: () => void;
@@ -1028,7 +1058,19 @@ function AvailabilityGrid(input: {
                 const displayNames = namesBySlot.get(slot.key) ?? [];
                 const isInteractive = Boolean(input.onToggleSlot);
                 const isSelected = input.selectedAvailability?.[slot.key] ?? false;
-                const showTooltip = hoveredSlotKey === slot.key && displayNames.length > 0;
+                const tooltipNames = isSelected
+                  ? [input.currentParticipantLabel ?? 'You', ...displayNames]
+                  : displayNames;
+                const showTooltip = hoveredSlotKey === slot.key && tooltipNames.length > 0;
+                const slotSummary = isSelected
+                  ? freeCount > 0
+                    ? `${input.currentParticipantLabel ?? 'You'} + ${freeCount} free`
+                    : `${input.currentParticipantLabel ?? 'You'} is free`
+                  : exactSet.has(slot.key)
+                    ? 'All free'
+                    : freeCount > 0
+                      ? `${freeCount} free`
+                      : 'No match';
                 const className = [
                   'slot-cell',
                   isSelected ? 'selected' : '',
@@ -1044,6 +1086,7 @@ function AvailabilityGrid(input: {
                     type="button"
                     className={className}
                     disabled={!isInteractive}
+                    aria-pressed={isSelected}
                     onPointerDown={(event) => {
                       if (!input.onToggleSlot) {
                         return;
@@ -1064,10 +1107,10 @@ function AvailabilityGrid(input: {
                     }}
                   >
                     <span>{slot.timeLabel}</span>
-                    <small>{exactSet.has(slot.key) ? 'All free' : freeCount > 0 ? `${freeCount} free` : 'No match'}</small>
+                    <small>{slotSummary}</small>
                     {showTooltip ? (
                       <span className="slot-tooltip" role="tooltip">
-                        {displayNames.join(', ')}
+                        {tooltipNames.join(', ')}
                       </span>
                     ) : null}
                   </button>

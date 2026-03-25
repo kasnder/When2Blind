@@ -498,7 +498,9 @@ button:hover,
 }
 
 .slot-cell.selected {
-  background: rgba(199, 239, 214, 0.95);
+  background: rgba(188, 236, 202, 0.98);
+  outline: 2px solid rgba(39, 108, 66, 0.28);
+  outline-offset: -2px;
 }
 
 .slot-cell.exact {

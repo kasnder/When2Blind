@@ -17,6 +17,7 @@ export type EventItem = {
     timeZone?: string;
   };
   status?: string;
+  transparency?: string;
 };
 
 let googleScriptPromise: Promise<void> | null = null;
