@@ -181,6 +181,12 @@ function CreateRoomPage() {
           Rooms auto-delete after {retentionDays ?? 30} days. Share the participant link, keep the owner link
           private, and only save links in this browser if you accept that risk.
         </p>
+        <p className="muted">
+          Privacy policy:{' '}
+          <a className="inline-link" href="https://kollnig.net/privacy/" target="_blank" rel="noreferrer">
+            kollnig.net/privacy/
+          </a>
+        </p>
 
         <form className="create-room-layout" onSubmit={handleCreateRoom}>
           <div className="create-room-main">
@@ -527,7 +533,7 @@ function ParticipantRoomPage() {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [encryptionSecret, setEncryptionSecret] = useState<string | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
-  const [decryptedSubmissions, setDecryptedSubmissions] = useState<DecryptedSubmission[]>([]);
+  const [decryptedSubmissions, setDecryptedSubmissions] = useState<DecryptedRoomSubmission[]>([]);
   const [displayName, setDisplayName] = useState('');
   const [availability, setAvailability] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);

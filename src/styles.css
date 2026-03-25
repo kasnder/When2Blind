@@ -139,6 +139,16 @@ h2 {
   color: #4b5d73;
 }
 
+.inline-link {
+  color: #965d12;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.14em;
+}
+
+.inline-link:hover {
+  color: #6f430a;
+}
+
 .controls {
   display: grid;
   gap: 1rem;
