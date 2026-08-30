@@ -342,9 +342,21 @@ To host the static app on GitHub Pages and keep the API on Railway:
 
 The workflow in [`.github/workflows/deploy-pages.yml`](/Users/konrad/Documents/privacy-meetings/.github/workflows/deploy-pages.yml) builds the client with the repository subpath as the Vite base and publishes `dist` to Pages. It also writes a `404.html` copy of `index.html` so direct visits to `/rooms/:roomId` and `/organize/:roomId` keep working on a static host.
 
+## Legal Pages
+
+Google OAuth verification requires a privacy policy and terms of service on the app domain. Both are rendered by the app itself:
+
+- `/privacy/` in [`src/pages/legal.tsx`](src/pages/legal.tsx), including the Google API Services User Data Policy Limited Use disclosure for the `calendar.readonly` scope
+- `/terms/` in the same file
+- both are linked from the site footer in [`src/components/SiteChrome.tsx`](src/components/SiteChrome.tsx), together with the operator site notice
+
+Keep them in sync with the actual behaviour of the service, especially the room retention window (`ROOM_TTL_DAYS`, 30 days by default) and the session lifetime (`SESSION_TTL_HOURS`, 12 hours by default).
+
 ## Files To Know
 
 - [`src/App.tsx`](/Users/konrad/Documents/privacy-meetings/src/App.tsx): bootstrap flow, URL scrubbing, client storage, organizer/participant UI
+- [`src/pages/legal.tsx`](src/pages/legal.tsx): privacy policy and terms of service pages
+- [`src/components/SiteChrome.tsx`](src/components/SiteChrome.tsx): shared header and footer, including the legal links
 - [`src/lib/crypto.ts`](/Users/konrad/Documents/privacy-meetings/src/lib/crypto.ts): encryption envelope logic
 - [`src/lib/api.ts`](/Users/konrad/Documents/privacy-meetings/src/lib/api.ts): API client
 - [`server/index.ts`](/Users/konrad/Documents/privacy-meetings/server/index.ts): API routes and security middleware

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 import { createRoom, deleteRoom, exchangeSession, fetchRoom, saveSubmission } from './lib/api';
 import { decryptSubmission, encryptSubmission } from './lib/crypto';
 import { ensureGoogleIdentityLoaded, fetchCalendarEvents, fetchGoogleCalendarList } from './lib/google';
 import { aggregateRoom, availabilityFromGoogleEvents, buildEmptyAvailability, buildRoomSlots, getRoomDateKeys } from './lib/room';
-import logoUrl from './assets/logo-120.png';
+import { BrandLockup, PageActions, SiteFooter } from './components/SiteChrome';
+import { PrivacyPolicyPage, TermsOfServicePage } from './pages/legal';
 import type { DecryptedSubmission, Room } from './types';
 import type { CalendarListEntry } from './lib/google';
 
@@ -75,6 +76,8 @@ function App() {
       <Route path="/" element={<CreateRoomPage />} />
       <Route path="/rooms/:roomId" element={<ParticipantRoomPage />} />
       <Route path="/organize/:roomId" element={<OrganizerPage />} />
+      <Route path="/privacy" element={<PrivacyPolicyPage />} />
+      <Route path="/terms" element={<TermsOfServicePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -373,11 +376,7 @@ function CreateRoomPage() {
         )}
       </section>
 
-      <footer className="site-footer">
-        <a className="inline-link" href="https://kollnig.net/privacy/" target="_blank" rel="noreferrer">
-          Privacy policy
-        </a>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }
@@ -506,6 +505,7 @@ function OrganizerPage() {
           {deleting ? 'Deleting room...' : 'Delete room'}
         </button>
       </section>
+      <SiteFooter />
     </main>
   );
 }
@@ -999,32 +999,8 @@ function ParticipantRoomPage() {
 
         {isLoading ? <p className="muted">Loading encrypted room data...</p> : null}
       </section>
+      <SiteFooter />
     </main>
-  );
-}
-
-function PageActions() {
-  return (
-    <div className="page-actions">
-      <Link className="brand-link" to="/">
-        <img className="brand-logo brand-logo-small" src={logoUrl} alt="When2Blind logo" />
-        <span className="eyebrow">When2Blind</span>
-      </Link>
-      <Link className="button-link secondary-link" to="/">
-        Back to start page
-      </Link>
-    </div>
-  );
-}
-
-function BrandLockup() {
-  return (
-    <div className="brand-lockup">
-      <img className="brand-logo" src={logoUrl} alt="When2Blind logo" />
-      <div>
-        <p className="eyebrow">When2Blind</p>
-      </div>
-    </div>
   );
 }
 
