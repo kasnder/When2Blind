@@ -78,10 +78,10 @@ export function PrivacyPolicyPage() {
       </p>
       <h3>3.4 Data stored in your browser</h3>
       <p>
-        We do not use cookies. The application uses your browser&apos;s <code>sessionStorage</code> for the short-lived
-        session token needed to talk to the API, and your browser&apos;s <code>localStorage</code> only if you
-        explicitly tick the option to save a room link on your device. You can remove all of it by clearing site data
-        for this domain.
+        We set no cookies for analytics or advertising, and the application does not rely on cookies at all. It uses
+        your browser&apos;s <code>sessionStorage</code> for the short-lived session token needed to talk to the API, and
+        your browser&apos;s <code>localStorage</code> only if you explicitly tick the option to save a room link on your
+        device. You can remove all of it by clearing site data for this domain.
       </p>
 
       <h2>4. Google Calendar integration</h2>
@@ -110,6 +110,12 @@ export function PrivacyPolicyPage() {
         </li>
         <li>We do not use refresh tokens, so When2Blind has no access to your calendar in the background.</li>
       </ul>
+      <p>
+        The import requires Google&apos;s Identity Services library, which your browser loads from
+        <code>accounts.google.com</code> when you start the import. As with any request to Google, Google then receives
+        your IP address and the usual request metadata. Nothing else on the site loads code or content from third
+        parties.
+      </p>
       <p>
         You can review and withdraw the access you granted at any time at{' '}
         <a
