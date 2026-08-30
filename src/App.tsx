@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { createRoom, deleteRoom, exchangeSession, fetchRoom, saveSubmission } from './lib/api';
 import { decryptSubmission, encryptSubmission } from './lib/crypto';
 import { ensureGoogleIdentityLoaded, fetchCalendarEvents, fetchGoogleCalendarList } from './lib/google';
@@ -72,15 +72,30 @@ const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<CreateRoomPage />} />
-      <Route path="/rooms/:roomId" element={<ParticipantRoomPage />} />
-      <Route path="/organize/:roomId" element={<OrganizerPage />} />
-      <Route path="/privacy" element={<PrivacyPolicyPage />} />
-      <Route path="/terms" element={<TermsOfServicePage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <ScrollToTop />
+      <Routes>
+        <Route path="/" element={<CreateRoomPage />} />
+        <Route path="/rooms/:roomId" element={<ParticipantRoomPage />} />
+        <Route path="/organize/:roomId" element={<OrganizerPage />} />
+        <Route path="/privacy" element={<PrivacyPolicyPage />} />
+        <Route path="/terms" element={<TermsOfServicePage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
+}
+
+// BrowserRouter has no scroll restoration of its own, so a link from the footer
+// of a long page would otherwise land mid-document.
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
 }
 
 function CreateRoomPage() {
